@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Start WellNotes from the source tree (resolves symlinks, e.g. from ~/.local/bin).
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+cd "$(dirname "$SELF")/.." || exit 1
+ROOT="$PWD"
+cd - >/dev/null || true
+PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m wellnotes "$@"

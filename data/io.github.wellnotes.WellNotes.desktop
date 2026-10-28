@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=WellNotes
+GenericName=Handschriftliche Notizen
+Comment=Notizbücher mit Stift schreiben – kompatibel mit .goodnotes
+Exec=wellnotes %F
+Icon=io.github.wellnotes.WellNotes
+Terminal=false
+Categories=Office;GTK;
+MimeType=application/x-goodnotes;application/pdf;text/markdown;
+Keywords=notes;notizen;pen;stift;goodnotes;pdf;markdown;handwriting;
+StartupNotify=true

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.wellnotes.WellNotes</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>WellNotes</name>
+  <summary>Handschriftliche Notizen – kompatibel mit .goodnotes</summary>
+  <description>
+    <p>WellNotes ist eine native GTK-4-App für handschriftliche Notizen mit Stift-Unterstützung.
+    Sie liest und schreibt .goodnotes-Dateien, importiert PDFs, Markdown, Obsidian-Vaults und Notion-Exporte
+    und synchronisiert mit Nextcloud, Google Drive oder einem Ordner.</p>
+  </description>
+  <launchable type="desktop-id">io.github.wellnotes.WellNotes.desktop</launchable>
+  <url type="homepage">https://github.com/bonbon08/wellnotes</url>
+  <url type="bugtracker">https://github.com/bonbon08/wellnotes/issues</url>
+  <developer id="io.github.bonbon08"><name>Jan Schmitt</name></developer>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.2.0" date="2026-10-28"/>
+  </releases>
+</component>

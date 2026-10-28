@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+/build/
+/dist/
+*.egg-info/
+# Arch build artifacts
+/packaging/arch/src/
+/packaging/arch/pkg/
+/packaging/arch/*.tar.*
+/packaging/arch/wellnotes/
+# Personal notebooks never belong in the repository
+*.goodnotes
+
+# Local planning notes
+Projektidee.md

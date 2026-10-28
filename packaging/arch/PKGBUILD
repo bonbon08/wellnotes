@@ -1,0 +1,31 @@
+# Maintainer: Jan Schmitt <mail at jan-schmitt dot eu>
+pkgname=wellnotes
+pkgver=0.2.0
+pkgrel=1
+pkgdesc="Handwritten notes for Linux (GTK 4) – compatible with .goodnotes files, Markdown/Obsidian import, Nextcloud/Google Drive sync"
+arch=('any')
+url="https://github.com/bonbon08/wellnotes"
+license=('GPL-3.0-or-later')
+depends=('python' 'python-gobject' 'python-cairo' 'gtk4' 'libadwaita' 'poppler-glib' 'pango' 'gdk-pixbuf2')
+makedepends=('python-build' 'python-installer' 'python-setuptools' 'python-wheel')
+optdepends=('libsecret: store sync passwords in the system keyring'
+            'gnome-online-accounts: Google Drive sign-in via GNOME Online Accounts'
+            'gnome-keyring: keyring backend for libsecret')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cd "$pkgname-$pkgver"
+  python -m build --wheel --no-isolation
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  python -m installer --destdir="$pkgdir" dist/*.whl
+  install -Dm644 data/io.github.wellnotes.WellNotes.desktop -t "$pkgdir/usr/share/applications/"
+  install -Dm644 data/io.github.wellnotes.WellNotes.svg -t "$pkgdir/usr/share/icons/hicolor/scalable/apps/"
+  install -Dm644 data/io.github.wellnotes.WellNotes.metainfo.xml -t "$pkgdir/usr/share/metainfo/"
+  install -Dm644 data/wellnotes-mime.xml "$pkgdir/usr/share/mime/packages/wellnotes.xml"
+  install -Dm644 README.md -t "$pkgdir/usr/share/doc/$pkgname/"
+  cp -r docs "$pkgdir/usr/share/doc/$pkgname/"
+}

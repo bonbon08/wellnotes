@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-goodnotes">
+    <comment>GoodNotes-Notizbuch</comment>
+    <sub-class-of type="application/zip"/>
+    <glob pattern="*.goodnotes"/>
+    <icon name="io.github.wellnotes.WellNotes"/>
+  </mime-type>
+</mime-info>

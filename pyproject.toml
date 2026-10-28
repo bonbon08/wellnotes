@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wellnotes"
+dynamic = ["version"]
+description = "Handschriftliche Notizen für Linux (GTK 4) – kompatibel mit .goodnotes-Dateien"
+readme = "README.md"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+authors = [{ name = "Jan Schmitt", email = "mail@jan-schmitt.eu" }]
+keywords = ["notes", "handwriting", "stylus", "goodnotes", "gtk", "markdown", "obsidian"]
+classifiers = [
+  "Environment :: X11 Applications :: GTK",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Topic :: Office/Business",
+]
+# PyGObject, pycairo, GTK 4, libadwaita and Poppler come from the distribution.
+
+[project.urls]
+Homepage = "https://github.com/bonbon08/wellnotes"
+Issues = "https://github.com/bonbon08/wellnotes/issues"
+
+[project.gui-scripts]
+wellnotes = "wellnotes.app:main"
+
+[tool.setuptools]
+packages = ["wellnotes"]
+
+[tool.setuptools.dynamic]
+version = { attr = "wellnotes.__version__" }
+
+[tool.setuptools.package-data]
+wellnotes = ["style.css", "icons/hicolor/scalable/*/*.svg"]
