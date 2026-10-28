@@ -36,17 +36,32 @@ Die Werkzeugleiste unter der Titelleiste enthält die Werkzeuge. Rechts daneben 
 
 | Werkzeug | Taste | Bedienung | Optionen |
 |---|---|---|---|
-| Stift | P | Schreiben | *Füller* (Stärke folgt dem Druck) oder *Kuli* (gleichmäßig); 5 Farben + eigene Farbe; 3 Stärken |
-| Textmarker | H | Markieren | 5 Farben, 3 Stärken. Die Markierung liegt immer *unter* der Tinte. |
-| Radierer | E | Über Striche fahren | *Ganzer Strich* löscht berührte Striche, *Präzise* radiert nur den berührten Teil; 3 Größen |
+| Stift | P | Schreiben | *Füller* (Stärke folgt dem Druck) oder *Kuli* (gleichmäßig); 5 Farben + eigene Farbe; Stärke (siehe unten) |
+| Textmarker | H | Markieren | 5 Farben, Stärke. Die Markierung liegt immer *unter* der Tinte. |
+| Radierer | E | Über Striche fahren | *Ganzer Strich* löscht berührte Striche, *Präzise* radiert nur den berührten Teil; Größe |
 | Formen | S | Form freihand zeichnen und loslassen | Wird zu Linie, Dreieck, Rechteck, Polygon, Ellipse oder Kreis. Nicht erkannte Formen bleiben freihand. |
 | Lasso | L | Elemente umkreisen | Auswahl verschieben (ziehen), an den Ecken skalieren; Menü: Ausschneiden, Kopieren, Duplizieren, Löschen, Farbe ändern |
-| Text | T | Auf die Seite klicken | Neues Textfeld oder vorhandenes bearbeiten; Esc oder Klick daneben beendet die Eingabe; 3 Größen, Farben |
+| Text | T | Auf die Seite klicken | Neues Textfeld oder vorhandenes bearbeiten; Esc oder Klick daneben beendet die Eingabe; Größe, Farben; *Auf Linien* (siehe unten) |
 | Bild | – | Datei wählen | Wird mittig eingefügt und ist sofort ausgewählt. Bilder lassen sich auch mit Strg+V aus der Zwischenablage einfügen. |
 
 **Eigene Farbe.** Der graue Farbpunkt ist frei belegbar: einmal klicken öffnet die Farbauswahl, Rechtsklick ändert die Farbe später.
 
+**Stärke und Größe.** Jedes Werkzeug hat drei Vorgaben (die Punkte) und daneben einen Knopf mit der genauen Zahl.
+- Der Knopf öffnet einen Regler und ein Eingabefeld für beliebige Werte. Die Spanne reicht beim Stift von 0,3 bis 30, beim Text von 8 bis 140.
+- Was du dort einstellst, wird zur aktuell gewählten Vorgabe und bleibt gespeichert. So kannst du dir die drei Punkte selbst belegen.
+
+**Text auf den Linien.** Mit *Auf Linien* (Optionen des Text-Werkzeugs, standardmäßig an) landet getippter Text auf liniertem, kariertem oder gepunktetem Papier genau auf den Linien.
+- Die Schriftgröße passt sich dem Linienabstand an.
+- Jede Textzeile steht auf einer Linie, auch beim automatischen Umbruch.
+- Auf liniertem Papier beginnt der Text rechts vom roten Rand.
+
+Ist *Auf Linien* aus, oder bei Blanko- und PDF-Seiten, gilt die eingestellte Textgröße.
+
 **Zoom.** Strg+Mausrad, Pinch-Geste am Touchpad oder Touchscreen, Strg+Plus/Minus. Strg+0 passt wieder an die Breite an (Knopf in der Titelleiste).
+
+**Vollbild.** F11 oder der Knopf mit den Pfeilen in der Titelleiste. Die Titelleiste verschwindet, und die Werkzeugleiste zeigt links *Vollbild verlassen* und Rückgängig/Wiederholen, rechts die Seitenzahl und *Neue Seite*. Mit F11 geht es zurück.
+
+**Zurück zur Bibliothek.** Nur über den Pfeil oben links oder Alt+←. Wischgesten und die Esc-Taste schließen ein Notizbuch absichtlich *nicht*, damit nichts versehentlich zugeht.
 
 **Rückgängig/Wiederholen.** Strg+Z / Strg+Umschalt+Z oder die Pfeile in der Titelleiste. Das gilt auch für Radieren, Verschieben und Seitenänderungen.
 
@@ -60,7 +75,14 @@ WellNotes nutzt die Tablet-Unterstützung von GTK 4 und funktioniert damit unter
 - **Radierer-Spitze** (Stift umdrehen) und **Stifttaste gedrückt halten** radieren, egal welches Werkzeug gewählt ist.
 - **Finger** scrollen und zoomen standardmäßig. So zeichnet die aufliegende Hand nicht mit.
 - **Mit dem Finger zeichnen** (Menü ☰ im Notizbuch) schaltet Fingerzeichnen ein. Sobald ein Stift benutzt wurde, scrollen Finger wieder, damit die Handflächenerkennung greift.
+- Mit **zwei Fingern** zoomen und gleichzeitig verschieben; der Inhalt bleibt dabei unter den Fingern.
+- Nach einem schnellen **Wisch mit dem Finger** gleitet die Seite noch etwas weiter, wie in Tablet-Apps üblich.
 - Die **mittlere Maustaste** verschiebt die Ansicht.
+
+**Leistung auf älteren Geräten.** Damit Schreiben auch auf schwachen Tablets flüssig bleibt:
+- Seiten liegen als Texturen auf der Grafikkarte.
+- Ein neuer Strich wird während des Schreibens nur stückweise ergänzt.
+- Seiten werden im Hintergrund gezeichnet.
 
 ## Seiten
 
@@ -90,7 +112,7 @@ Große Importe laufen im Hintergrund. Ein Balken oben zeigt den Fortschritt, dor
   - Links
   - verschachtelte Listen, Aufgabenlisten
   - Zitate, Codeblöcke, Tabellen, Trennlinien
-  - Bilder
+  - Bilder (auch mehrere hintereinander, neben Text und in Tabellenzellen; lokale Dateien, Web-Adressen und eingebettete `data:`-Bilder)
 - **Obsidian**:
   - `[[Notiz]]`, `[[Notiz|Alias]]`, `[[Notiz#Überschrift]]` werden als Links dargestellt.
   - `![[bild.png]]`, `![[bild.png|300]]`: Das Bild wird irgendwo im Vault gesucht und optional skaliert.
@@ -99,7 +121,11 @@ Große Importe laufen im Hintergrund. Ein Balken oben zeigt den Fortschritt, dor
   - Callouts `> [!note]`, `> [!warning] Titel` … in passenden Farben
   - `==Markierung==`, `#tags`, Fußnoten `[^1]`
   - `%%Kommentare%%` werden ausgeblendet, ebenso die Properties (YAML-Kopf).
-  - `$Formeln$` und `$$…$$` erscheinen unformatiert (kein LaTeX-Satz).
+- **LaTeX-Formeln**:
+  - `$…$` im Text, `$$…$$` als abgesetzte Formel, auch in Tabellen und Callouts
+  - Unterstützt werden Brüche, Wurzeln, Indizes, Integrale, Summen, griechische Buchstaben, `\vec`, `\overline`, `\mathbb`, `\text` …
+  - Dazu die Umgebungen `pmatrix`, `bmatrix`, `vmatrix`, `matrix`, `cases` und `aligned`/`align`/`gather`.
+  - Voraussetzung ist Matplotlib (`python-matplotlib`). Fehlt es, oder ist eine Formel nicht darstellbar, erscheint der Quelltext kursiv.
 
 Auch eine einzelne `.md`-Datei aus einem Vault findet ihre Bilder und Einbettungen, denn WellNotes erkennt den Vault am Ordner `.obsidian`.
 
@@ -189,6 +215,8 @@ Passwörter und Tokens liegen im System-Schlüsselbund (libsecret, z. B. GNOME K
 | Bild auf / Bild ab | Vorherige / nächste Seite |
 | Strg+Plus / Strg+Minus / Strg+0 | Zoom / an Breite anpassen |
 | Strg+S | Sofort speichern |
+| F11 | Vollbild ein/aus |
+| Alt+← | Zurück zur Bibliothek |
 | Strg+E | Als PDF exportieren |
 | Strg+N / Strg+O / Strg+F | Neues Notizbuch / Importieren / Suchen (Bibliothek) |
 | Strg+Komma | Einstellungen |

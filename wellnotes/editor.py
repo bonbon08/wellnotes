@@ -12,16 +12,23 @@ from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 from . import fileformat, render  # noqa: E402
 from .canvas import NotebookCanvas  # noqa: E402
 from .dialogs import PaperDialog  # noqa: E402
+from . import settings  # noqa: E402
 from .model import Document, Page  # noqa: E402
 
 PEN_COLORS = [(0.08, 0.08, 0.1, 1), (0.13, 0.36, 0.86, 1), (0.85, 0.18, 0.18, 1), (0.1, 0.6, 0.3, 1),
               (0.55, 0.25, 0.75, 1)]
 HL_COLORS = [(1.0, 0.86, 0.2, 1), (0.55, 0.9, 0.4, 1), (1.0, 0.55, 0.75, 1), (0.45, 0.8, 1.0, 1),
              (1.0, 0.65, 0.3, 1)]
-PEN_WIDTHS = [1.4, 2.4, 4.0]
-HL_WIDTHS = [12.0, 22.0, 34.0]
-ERASER_SIZES = [6.0, 14.0, 30.0]
-TEXT_SIZES = [20.0, 28.0, 40.0]
+# Default presets and slider ranges per tool (page units; A4 is 1091 wide).
+SIZES = {
+    "pen": ([1.4, 2.4, 4.0], (0.3, 30.0)),
+    "shape": ([1.4, 2.4, 4.0], (0.3, 30.0)),
+    "highlighter": ([12.0, 22.0, 34.0], (4.0, 90.0)),
+    "text": ([20.0, 28.0, 40.0], (8.0, 140.0)),
+    "eraser": ([6.0, 14.0, 30.0], (2.0, 100.0)),
+}
+SIZE_ATTR = {"pen": "pen_width", "shape": "shape_width", "highlighter": "hl_width", "text": "text_size",
+             "eraser": "eraser_size"}
 
 _clipboard = []  # internal element clipboard shared between editors
 CLIP_MARK = "wellnotes:elements"
@@ -64,21 +71,125 @@ class Dot(Gtk.ToggleButton):
         super().__init__()
         self.add_css_class("flat")
         self.size = size
-        da = Gtk.DrawingArea(content_width=22, content_height=22)
-        da.set_draw_func(self._draw)
-        self.set_child(da)
+        self.da = Gtk.DrawingArea(content_width=22, content_height=22)
+        self.da.set_draw_func(self._draw)
+        self.set_child(self.da)
+
+    def set_size(self, size):
+        self.size = size
+        self.da.queue_draw()
 
     def _draw(self, da, cr, w, h):
         import math
         fg = self.get_color()
         cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.85)
-        cr.arc(w / 2, h / 2, self.size, 0, 2 * math.pi)
+        cr.arc(w / 2, h / 2, min(10, self.size), 0, 2 * math.pi)
         cr.fill()
+
+
+class SizeControl(Gtk.Box):
+    """Three size presets plus a slider for any value; moving the slider edits the active preset."""
+
+    def __init__(self, tools, tool):
+        super().__init__(spacing=2)
+        import math
+        self.tools, self.tool = tools, tool
+        self.attr = SIZE_ATTR[tool]
+        defaults, (lo, hi) = SIZES[tool]
+        stored = settings.get("tools").get(tool)
+        self.presets = list(stored) if isinstance(stored, list) and len(stored) == 3 else list(defaults)
+        cur = getattr(tools, self.attr)
+        if not any(abs(cur - p) < 1e-6 for p in self.presets):
+            setattr(tools, self.attr, self.presets[1])
+            cur = self.presets[1]
+        self.active = min(range(3), key=lambda k: abs(self.presets[k] - cur))
+        self.dots = []
+        group = None
+        names = ("Klein", "Mittel", "Groß") if tool == "text" else ("Dünn", "Mittel", "Dick")
+        for k in range(3):
+            d = Dot(self._radius(self.presets[k]))
+            d.set_tooltip_text("%s – zum Ändern den Regler rechts nutzen" % names[k])
+            if group:
+                d.set_group(group)
+            group = group or d
+            d.set_active(k == self.active)
+            d.connect("toggled", self._on_dot, k)
+            self.append(d)
+            self.dots.append(d)
+        # Slider on a logarithmic scale so thin pens get fine control.
+        self.lo, self.hi = lo, hi
+        self.scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, math.log(lo), math.log(hi), 0.01)
+        self.scale.set_draw_value(False)
+        self.scale.set_size_request(220, -1)
+        self.spin = Gtk.SpinButton.new_with_range(lo, hi, 0.1 if hi <= 40 else 1)
+        self.spin.set_digits(1 if hi <= 40 else 0)
+        box = Gtk.Box(spacing=8, margin_top=6, margin_bottom=6, margin_start=6, margin_end=6)
+        box.append(self.scale)
+        box.append(self.spin)
+        pop = Gtk.Popover(child=box)
+        self.button = Gtk.MenuButton(popover=pop, css_classes=["flat", "wn-small"],
+                                     tooltip_text="Größe genau einstellen")
+        self.append(self.button)
+        self._sync = False
+        self.scale.connect("value-changed", self._on_scale)
+        self.spin.connect("value-changed", self._on_spin)
+        pop.connect("closed", lambda p: self._save())
+        self._show(cur)
+
+    def _radius(self, v):
+        import math
+        lo, hi = SIZES[self.tool][1]
+        return 2 + 8 * (math.log(v) - math.log(lo)) / (math.log(hi) - math.log(lo))
+
+    def _show(self, v):
+        import math
+        self._sync = True
+        self.scale.set_value(math.log(v))
+        self.spin.set_value(v)
+        self._sync = False
+        self.button.set_label(("%.1f" % v).rstrip("0").rstrip(".") if v < 10 else "%d" % round(v))
+
+    def _on_dot(self, d, k):
+        if d.get_active():
+            self.active = k
+            setattr(self.tools, self.attr, self.presets[k])
+            self._show(self.presets[k])
+
+    def _set(self, v):
+        v = max(self.lo, min(self.hi, v))
+        self.presets[self.active] = v
+        self.dots[self.active].set_size(self._radius(v))
+        setattr(self.tools, self.attr, v)
+
+    def _on_scale(self, sc):
+        import math
+        if self._sync:
+            return
+        v = round(math.exp(sc.get_value()), 1)
+        self._set(v)
+        self._sync = True
+        self.spin.set_value(v)
+        self._sync = False
+        self.button.set_label(("%.1f" % v).rstrip("0").rstrip(".") if v < 10 else "%d" % round(v))
+
+    def _on_spin(self, sp):
+        if self._sync:
+            return
+        self._set(sp.get_value())
+        self._show(sp.get_value())
+
+    def _save(self):
+        tools = settings.get("tools")
+        tools[self.tool] = self.presets
+        settings.save()
 
 
 class Editor(Adw.NavigationPage):
     def __init__(self, window, doc: Document):
         super().__init__(title=doc.title, tag="editor")
+        # No swipe/escape/back-gesture pops: on tablets a sideways swipe closed notebooks by accident.
+        # The page is closed only via the explicit back button (or Alt+Left).
+        self.set_can_pop(False)
         self.window = window
         self.doc = doc
         self.tools = window.tools
@@ -98,7 +209,8 @@ class Editor(Adw.NavigationPage):
         self.canvas.connect("selection-changed", self._on_selection_changed)
 
         view = Adw.ToolbarView()
-        view.add_top_bar(self._build_header())
+        self.header = self._build_header()
+        view.add_top_bar(self.header)
         view.add_top_bar(self._build_toolbar())
         view.set_top_bar_style(Adw.ToolbarStyle.RAISED)
 
@@ -145,6 +257,10 @@ class Editor(Adw.NavigationPage):
         hb = Adw.HeaderBar()
         self.title_widget = Adw.WindowTitle(title=self.doc.title)
         hb.set_title_widget(self.title_widget)
+        hb.set_show_back_button(False)
+        back = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text="Zurück zur Bibliothek (Alt+←)",
+                          action_name="ed.back")
+        hb.pack_start(back)
         self.sidebar_button = Gtk.ToggleButton(icon_name="view-grid-symbolic", tooltip_text="Seitenübersicht")
         hb.pack_start(self.sidebar_button)
 
@@ -172,6 +288,8 @@ class Editor(Adw.NavigationPage):
         more = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu, tooltip_text="Menü")
         hb.pack_end(more)
 
+        hb.pack_end(Gtk.Button(icon_name="view-fullscreen-symbolic", tooltip_text="Vollbild (F11)",
+                               action_name="ed.fullscreen"))
         add = Gtk.Button(icon_name="list-add-symbolic", tooltip_text="Neue Seite (Strg+Umschalt+N)",
                          action_name="ed.add-page-after")
         hb.pack_end(add)
@@ -187,8 +305,26 @@ class Editor(Adw.NavigationPage):
         return hb
 
     def _build_toolbar(self):
-        bar = Gtk.Box(spacing=4, css_classes=["wn-toolbar"])
-        bar.set_halign(Gtk.Align.CENTER)
+        outer = Gtk.CenterBox(css_classes=["wn-toolbar"])
+        # Shown only in fullscreen, where the header bar is hidden.
+        self.fs_start = Gtk.Box(spacing=4, visible=False)
+        self.fs_start.append(Gtk.Button(icon_name="view-restore-symbolic", tooltip_text="Vollbild verlassen (F11)",
+                                        action_name="ed.fullscreen", css_classes=["flat"]))
+        undo = Gtk.Box(css_classes=["linked"])
+        undo.append(Gtk.Button(icon_name="edit-undo-symbolic", tooltip_text="Rückgängig", action_name="ed.undo",
+                               css_classes=["flat"]))
+        undo.append(Gtk.Button(icon_name="edit-redo-symbolic", tooltip_text="Wiederholen", action_name="ed.redo",
+                               css_classes=["flat"]))
+        self.fs_start.append(undo)
+        outer.set_start_widget(self.fs_start)
+        self.fs_end = Gtk.Box(spacing=4, visible=False)
+        self.fs_page = Gtk.Label(css_classes=["dim-label", "numeric"])
+        self.fs_end.append(self.fs_page)
+        self.fs_end.append(Gtk.Button(icon_name="list-add-symbolic", tooltip_text="Neue Seite",
+                                      action_name="ed.add-page-after", css_classes=["flat"]))
+        outer.set_end_widget(self.fs_end)
+        bar = Gtk.Box(spacing=4)
+        outer.set_center_widget(bar)
         self.tool_buttons = {}
         group = None
         for name, icon, tip in [("pen", "wn-pen-symbolic", "Stift (P)"),
@@ -209,23 +345,20 @@ class Editor(Adw.NavigationPage):
         bar.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL, margin_start=6, margin_end=6))
         self.options = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE, hhomogeneous=False,
                                  interpolate_size=True)
-        self.options.add_named(self._color_width_options("pen", PEN_COLORS, PEN_WIDTHS, styles=True), "pen")
-        self.options.add_named(self._color_width_options("highlighter", HL_COLORS, HL_WIDTHS, dot_scale=0.35),
-                               "highlighter")
-        self.options.add_named(self._color_width_options("shape", PEN_COLORS, PEN_WIDTHS), "shape")
-        self.options.add_named(self._color_width_options("text", PEN_COLORS, TEXT_SIZES, dot_scale=0.18), "text")
+        self.options.add_named(self._color_width_options("pen", PEN_COLORS, styles=True), "pen")
+        self.options.add_named(self._color_width_options("highlighter", HL_COLORS), "highlighter")
+        self.options.add_named(self._color_width_options("shape", PEN_COLORS), "shape")
+        self.options.add_named(self._color_width_options("text", PEN_COLORS), "text")
         self.options.add_named(self._eraser_options(), "eraser")
         self.options.add_named(Gtk.Label(label="Elemente umkreisen, um sie auszuwählen",
                                          css_classes=["dim-label"]), "lasso")
         bar.append(self.options)
-        return bar
+        return outer
 
-    def _color_width_options(self, tool, colors, widths, styles=False, dot_scale=None):
+    def _color_width_options(self, tool, colors, styles=False):
         box = Gtk.Box(spacing=2)
         attr_color = {"pen": "pen_color", "highlighter": "hl_color", "shape": "shape_color",
                       "text": "text_color"}[tool]
-        attr_width = {"pen": "pen_width", "highlighter": "hl_width", "shape": "shape_width",
-                      "text": "text_size"}[tool]
         if styles:
             sg = None
             for style, label, tip in [("fountain", "Füller", "Druckempfindlicher Füller"),
@@ -261,17 +394,14 @@ class Editor(Adw.NavigationPage):
                        and self._choose_color(s, attr_color))
         box.append(custom)
         box.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL, margin_start=4, margin_end=4))
-        wg = None
-        cur_w = getattr(self.tools, attr_width)
-        for k, w in enumerate(widths):
-            d = Dot(2 + k * 2.2 if dot_scale is None else max(2, w * dot_scale * (0.7 if tool == "text" else 1)))
-            d.set_tooltip_text(("Dünn", "Mittel", "Dick")[k] if tool != "text" else ("Klein", "Mittel", "Groß")[k])
-            if wg:
-                d.set_group(wg)
-            wg = wg or d
-            d.set_active(abs(w - cur_w) < 1e-6)
-            d.connect("toggled", lambda d, w=w: d.get_active() and setattr(self.tools, attr_width, w))
-            box.append(d)
+        box.append(SizeControl(self.tools, tool))
+        if tool == "text":
+            lines = Gtk.ToggleButton(label="Auf Linien", css_classes=["flat", "wn-small"],
+                                     tooltip_text="Text auf den Linien bzw. Kästchen des Papiers schreiben",
+                                     active=self.tools.text_on_lines)
+            lines.connect("toggled", lambda b: setattr(self.tools, "text_on_lines", b.get_active()))
+            box.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL, margin_start=4, margin_end=4))
+            box.append(lines)
         return box
 
     def _eraser_options(self):
@@ -286,16 +416,7 @@ class Editor(Adw.NavigationPage):
             b.connect("toggled", lambda b, p=precise: b.get_active() and setattr(self.tools, "eraser_precise", p))
             box.append(b)
         box.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL, margin_start=4, margin_end=4))
-        wg = None
-        for k, s in enumerate(ERASER_SIZES):
-            d = Dot(2.5 + k * 2.5)
-            d.set_tooltip_text(("Klein", "Mittel", "Groß")[k])
-            if wg:
-                d.set_group(wg)
-            wg = wg or d
-            d.set_active(s == self.tools.eraser_size)
-            d.connect("toggled", lambda d, s=s: d.get_active() and setattr(self.tools, "eraser_size", s))
-            box.append(d)
+        box.append(SizeControl(self.tools, "eraser"))
         return box
 
     def _on_swatch(self, s, attr):
@@ -391,6 +512,8 @@ class Editor(Adw.NavigationPage):
         add("next-page", lambda: self.canvas.scroll_to_page(self.canvas.current_page + 1))
         add("prev-page", lambda: self.canvas.scroll_to_page(self.canvas.current_page - 1))
         add("save", lambda: self.save(sync=True))
+        add("back", lambda: self.window.nav.pop())
+        add("fullscreen", self.toggle_fullscreen)
         for t in ("pen", "highlighter", "eraser", "shape", "lasso", "text"):
             add("tool-" + t, lambda t=t: self._select_tool(t))
         finger = Gio.SimpleAction.new_stateful("finger-draw", None, GLib.Variant.new_boolean(self.tools.finger_draw))
@@ -412,6 +535,7 @@ class Editor(Adw.NavigationPage):
                               ("<Control>plus", "zoom-in"), ("<Control>equal", "zoom-in"),
                               ("<Control>minus", "zoom-out"), ("Page_Down", "next-page"),
                               ("Page_Up", "prev-page"), ("<Control>s", "save"), ("<Control>e", "export-pdf"),
+                              ("F11", "fullscreen"), ("<Alt>Left", "back"),
                               ("p", "tool-pen"), ("h", "tool-highlighter"), ("e", "tool-eraser"),
                               ("s", "tool-shape"), ("l", "tool-lasso"), ("t", "tool-text")]:
             sc.add_shortcut(Gtk.Shortcut(trigger=Gtk.ShortcutTrigger.parse_string(accel),
@@ -638,9 +762,21 @@ class Editor(Adw.NavigationPage):
             self.page_list.select_row(row)
         self._update_undo_actions()
 
+    def toggle_fullscreen(self):
+        if self.window.is_fullscreen():
+            self.window.unfullscreen()
+        else:
+            self.window.fullscreen()
+
+    def on_fullscreen_changed(self, fullscreen):
+        self.header.set_visible(not fullscreen)
+        self.fs_start.set_visible(fullscreen)
+        self.fs_end.set_visible(fullscreen)
+
     def _update_page_label(self):
         n = len(self.doc.pages)
         i = self.canvas.current_page + 1
+        self.fs_page.set_label("%d / %d" % (i, n))
         self.page_label.set_label("%d / %d" % (i, n))
         self.title_widget.set_subtitle("Seite %d von %d" % (i, n))
 

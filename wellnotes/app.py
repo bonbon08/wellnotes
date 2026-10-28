@@ -35,8 +35,14 @@ class Window(Adw.ApplicationWindow):
                                 self._on_sync_state)
         self.library.update_sync_visibility()
         self.connect("close-request", self._on_close)
+        self.connect("notify::fullscreened", self._on_fullscreen)
+        self.nav.connect("popped", lambda nav, page: self.is_fullscreen() and self.unfullscreen())
         if self.sync.enabled and settings.get("sync", "auto"):
             GLib.timeout_add_seconds(2, lambda: self.sync.sync(quiet=True) and False)
+
+    def _on_fullscreen(self, *a):
+        for ed in self.editors:
+            ed.on_fullscreen_changed(self.is_fullscreen())
 
     def _on_sync_state(self, running, message, error):
         self.library.on_sync_state(running, message, error)

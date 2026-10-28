@@ -1,6 +1,8 @@
 """The notebook canvas: continuous vertical page view with pen input."""
 
 import math
+import queue
+import threading
 
 import cairo
 import gi
@@ -9,13 +11,15 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 gi.require_version("Graphene", "1.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gdk, GLib, GObject, Graphene, Gtk  # noqa: E402
+gi.require_version("Gsk", "4.0")
+from gi.repository import Adw, Gdk, GLib, GObject, Graphene, Gsk, Gtk, Pango  # noqa: E402
 
 from . import render, shapes  # noqa: E402
 from .model import Stroke, Text, bbox_union, clone_elements, dist_point_segment, point_in_polygon  # noqa: E402
 
 PAD = 40.0  # page units around/between pages
-MAX_CACHE_PIXELS = 14_000_000
+MAX_CACHE_PIXELS = 10_000_000
+STRIP = 256  # rows per GPU texture strip of a page cache
 HANDLE = 9  # screen px
 
 
@@ -35,17 +39,97 @@ class Tools:
         self.eraser_precise = False
         self.text_size = 28.0
         self.text_color = (0.08, 0.08, 0.1, 1.0)
+        self.text_on_lines = True
         self.finger_draw = False
 
 
+def _rect(x, y, w, h):
+    return Graphene.Rect().init(x, y, w, h)
+
+
+def _rgba(r, g, b, a=1.0):
+    c = Gdk.RGBA()
+    c.red, c.green, c.blue, c.alpha = r, g, b, a
+    return c
+
+
 class _Cache:
-    __slots__ = ("version", "scale", "surface", "skip")
+    """A rendered page: a cairo surface plus lazily uploaded GPU textures in horizontal strips.
+
+    Drawing onto the surface only re-uploads the strips that changed, so a new
+    stroke costs a few hundred kilobytes instead of the whole page.
+    """
 
     def __init__(self, version, scale, surface, skip):
         self.version = version
         self.scale = scale
         self.surface = surface
         self.skip = skip
+        self.strips = [None] * ((surface.get_height() + STRIP - 1) // STRIP)
+
+    def texture(self, i):
+        tex = self.strips[i]
+        if tex is None:
+            surf = self.surface
+            surf.flush()
+            stride = surf.get_stride()
+            y0 = i * STRIP
+            h = min(STRIP, surf.get_height() - y0)
+            data = surf.get_data()[y0 * stride:(y0 + h) * stride]
+            tex = Gdk.MemoryTexture.new(surf.get_width(), h, Gdk.MemoryFormat.B8G8R8A8_PREMULTIPLIED,
+                                        GLib.Bytes.new(bytes(data)), stride)
+            self.strips[i] = tex
+        return tex
+
+    def dirty(self, y0, y1):
+        """Mark page-unit rows y0..y1 as changed."""
+        a = max(0, int(y0 * self.scale) // STRIP)
+        b = min(len(self.strips) - 1, int(math.ceil(y1 * self.scale)) // STRIP)
+        for i in range(a, b + 1):
+            self.strips[i] = None
+
+
+class _Renderer:
+    """Renders page caches in a background thread so scrolling never blocks on drawing."""
+
+    def __init__(self, doc, on_done):
+        self.on_done = on_done
+        self.res = render.ResourceCache(doc)  # own Poppler documents: not shared across threads
+        self.jobs = queue.Queue()
+        self.pending = set()
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def request(self, page, scale, skip):
+        key = (page.id, page.version, round(scale, 4), skip)
+        if key in self.pending:
+            return
+        self.pending.add(key)
+        snapshot = render_snapshot(page)
+        self.jobs.put((key, snapshot, scale, skip))
+
+    def _run(self):
+        while True:
+            key, page, scale, skip = self.jobs.get()
+            try:
+                surf = render.page_surface(page, self.res, scale, skip=skip)
+            except Exception as e:  # keep the worker alive; the page stays blank
+                print("WellNotes: Rendern fehlgeschlagen:", e)
+                surf = None
+            GLib.idle_add(self._done, key, surf)
+
+    def _done(self, key, surf):
+        self.pending.discard(key)
+        if surf is not None:
+            self.on_done(key, surf)
+        return False
+
+
+def render_snapshot(page):
+    """A frozen copy of a page for the render thread (elements are immutable)."""
+    from .model import Page
+    p = Page(page.width, page.height, page.background.copy(), list(page.elements), page.id)
+    p.version = page.version
+    return p
 
 
 class NotebookCanvas(Gtk.Widget):
@@ -65,6 +149,10 @@ class NotebookCanvas(Gtk.Widget):
         self.zoom = 0.5
         self.fit_width = True
         self._cache = {}
+        self._renderer = _Renderer(doc, self._on_rendered)
+        self._ink_layer = None
+        self._ink_box = None
+        self._sel_tex = None
         self._layout = []
         self._content = (1, 1)
         self._current_page = 0
@@ -265,12 +353,15 @@ class NotebookCanvas(Gtk.Widget):
         self.emit("zoom-changed", self.zoom)
 
     def _on_zoom_begin(self, g, seq):
+        self._stop_kinetic()
         self._zoom_start = self.zoom
         if self._mode in ("ink", "shape", "erase", "lasso"):
             self._cancel_interaction()
         self._mode = "pinch"
         ok, cx, cy = g.get_bounding_box_center()
-        self._pinch_center = (cx, cy)
+        ox, oy = self._origin()
+        # Content point under the fingers; it follows the fingers (pinch + two-finger pan).
+        self._pinch_anchor = ((cx - ox) / self.zoom, (cy - oy) / self.zoom)
 
     def _on_zoom_end(self, g, seq):
         if self._mode == "pinch":
@@ -280,6 +371,52 @@ class NotebookCanvas(Gtk.Widget):
     def _on_zoom_scale(self, g, scale):
         ok, cx, cy = g.get_bounding_box_center()
         self.set_zoom(self._zoom_start * scale, cx, cy)
+        ax, ay = self._pinch_anchor
+        if self._content[0] * self.zoom >= self.get_width():
+            self.hadj.set_value(ax * self.zoom - cx)
+        self.vadj.set_value(ay * self.zoom - cy)
+
+    # -- kinetic scrolling after a finger pan
+
+    def _pan_sample(self, dx, dy):
+        t = GLib.get_monotonic_time() / 1e6
+        self._pan_samples.append((t, dx, dy))
+        while len(self._pan_samples) > 2 and t - self._pan_samples[0][0] > 0.1:
+            self._pan_samples.pop(0)
+
+    def _start_kinetic(self):
+        s = self._pan_samples
+        if len(s) < 2 or s[-1][0] - s[0][0] <= 0:
+            return
+        dt = s[-1][0] - s[0][0]
+        vx, vy = -(s[-1][1] - s[0][1]) / dt, -(s[-1][2] - s[0][2]) / dt
+        if math.hypot(vx, vy) < 150:
+            return
+        self._kinetic = [vx, vy, GLib.get_monotonic_time() / 1e6]
+        self._kinetic_id = self.add_tick_callback(self._kinetic_tick)
+
+    def _kinetic_tick(self, widget, clock):
+        if not self._kinetic:
+            return False
+        vx, vy, last = self._kinetic
+        now = clock.get_frame_time() / 1e6
+        dt = min(0.05, max(0.0, now - last))
+        self.hadj.set_value(self.hadj.get_value() + vx * dt)
+        self.vadj.set_value(self.vadj.get_value() + vy * dt)
+        decay = math.exp(-4.0 * dt)
+        vx, vy = vx * decay, vy * decay
+        if math.hypot(vx, vy) < 20:
+            self._kinetic = None
+            self._kinetic_id = 0
+            return False
+        self._kinetic = [vx, vy, now]
+        return True
+
+    def _stop_kinetic(self):
+        if getattr(self, "_kinetic_id", 0):
+            self.remove_tick_callback(self._kinetic_id)
+        self._kinetic = None
+        self._kinetic_id = 0
 
     def _on_scroll(self, ctl, dx, dy):
         state = ctl.get_current_event_state()
@@ -315,10 +452,10 @@ class NotebookCanvas(Gtk.Widget):
     # page caches
 
     def invalidate(self, page=None):
-        if page is None:
-            self._cache.clear()
-        else:
-            self._cache.pop(page.id, None)
+        """Re-render a page (or all); the old picture stays visible until the new one is ready."""
+        for c in ([self._cache.get(page.id)] if page else list(self._cache.values())):
+            if c is not None:
+                c.version = -1
         self.queue_draw()
 
     def _desired_scale(self, page):
@@ -328,13 +465,23 @@ class NotebookCanvas(Gtk.Widget):
         return min(s, cap)
 
     def _cache_for(self, page, skip=frozenset()):
+        """The best available cache for a page; schedules a (re)render when it is outdated."""
         c = self._cache.get(page.id)
         want = self._desired_scale(page)
-        if c is None or c.version != page.version or c.skip != skip:
-            surf = render.page_surface(page, self.res, want, skip=skip)
-            c = _Cache(page.version, want, surf, skip)
-            self._cache[page.id] = c
+        stale = c is None or c.version != page.version or c.skip != skip or \
+            (self._mode != "pinch" and not self._rerender_id and abs(c.scale / want - 1) > 0.05)
+        if stale:
+            self._renderer.request(page, want, skip)
         return c
+
+    def _on_rendered(self, key, surf):
+        pid, version, scale, skip = key
+        page = next((p for p in self.doc.pages if p.id == pid), None)
+        if page is None or version != page.version:
+            self.queue_draw()  # outdated result; the next draw requests a fresh one
+            return
+        self._cache[pid] = _Cache(version, scale, surf, skip)
+        self.queue_draw()
 
     def _schedule_rerender(self):
         if self._rerender_id:
@@ -343,14 +490,7 @@ class NotebookCanvas(Gtk.Widget):
 
     def _rerender_visible(self):
         self._rerender_id = 0
-        if self._mode == "pinch":
-            return False
-        for i in self.visible_range():
-            page = self.doc.pages[i]
-            c = self._cache.get(page.id)
-            if c and abs(c.scale / self._desired_scale(page) - 1) > 0.05:
-                self._cache.pop(page.id)
-        self.queue_draw()
+        self.queue_draw()  # _cache_for notices the scale mismatch and requests new renders
         return False
 
     def _evict(self, visible):
@@ -374,12 +514,14 @@ class NotebookCanvas(Gtk.Widget):
         cr.clip()
         for el in elements:
             render.draw_element(cr, el, self.res)
+        box = bbox_union(e.bbox() for e in elements)
+        if box:
+            c.dirty(box[1], box[3])
         c.version = page.version
 
     def _repaint_region(self, page, box, old_version):
         c = self._cache.get(page.id)
         if c is None or c.version != old_version or c.skip:
-            self._cache.pop(page.id, None)
             return
         cr = cairo.Context(c.surface)
         cr.scale(c.scale, c.scale)
@@ -393,84 +535,166 @@ class NotebookCanvas(Gtk.Widget):
         cr.set_operator(cairo.OPERATOR_OVER)
         render.draw_background(cr, page, self.res, vector=False)
         render.draw_elements(cr, page, self.res, clip=box)
+        c.dirty(y0, y1)
         c.version = page.version
 
     # ------------------------------------------------------------------
-    # drawing
+    # drawing (render nodes: page textures are scaled by the GPU)
 
     def do_snapshot(self, snapshot):
         w, h = self.get_width(), self.get_height()
-        rect = Graphene.Rect().init(0, 0, w, h)
-        cr = snapshot.append_cairo(rect)
-        self._draw(cr, w, h)
-        del cr
-        if self._text_editor:
-            self.snapshot_child(self._text_editor["view"], snapshot)
-
-    def _draw(self, cr, w, h):
         dark = Adw.StyleManager.get_default().get_dark()
-        bgc = (0.17, 0.17, 0.19) if dark else (0.89, 0.89, 0.91)
-        cr.set_source_rgb(*bgc)
-        cr.paint()
+        snapshot.append_color(_rgba(0.17, 0.17, 0.19) if dark else _rgba(0.89, 0.89, 0.91), _rect(0, 0, w, h))
         visible = self.visible_range()
         self._evict(visible)
         sel_page = self.selection["page"] if self.selection else None
         moving = self._mode in ("move", "scale") and self.selection
+        shadow = _rgba(0, 0, 0, 0.18)
         for i in visible:
             page = self.doc.pages[i]
             x, y, pw, ph = self.page_rect(i)
-            # shadow
-            cr.set_source_rgba(0, 0, 0, 0.18)
-            cr.rectangle(x + 1, y + 2, pw, ph)
-            cr.fill()
+            snapshot.append_color(shadow, _rect(x + 1, y + 2, pw, ph))
             skip = frozenset(self.selection["ids"]) if moving and page is sel_page else frozenset()
             if self._text_editor and self._text_editor["page"] is page and self._text_editor.get("el"):
                 skip = skip | {self._text_editor["el"].id}
             c = self._cache_for(page, skip)
-            cr.save()
-            cr.rectangle(x, y, pw, ph)
-            cr.clip()
-            cr.translate(x, y)
-            s = self.zoom / c.scale
-            cr.scale(s, s)
-            cr.set_source_surface(c.surface, 0, 0)
-            cr.get_source().set_filter(cairo.FILTER_GOOD if abs(s - 1 / self.get_scale_factor()) > 0.01
-                                       else cairo.FILTER_FAST)
-            cr.paint()
-            cr.restore()
-            # overlays in page coordinates
-            cr.save()
-            cr.rectangle(x, y, pw, ph)
-            cr.clip()
-            cr.translate(x, y)
-            cr.scale(self.zoom, self.zoom)
-            if self._page is page and self._mode in ("ink", "shape") and self._points:
-                render.draw_stroke(cr, self._live_stroke())
-            if moving and page is sel_page:
-                for el in self._transformed_selection():
-                    render.draw_element(cr, el, self.res)
-            cr.restore()
-            if self._page is page and self._mode == "lasso" and len(self._lasso) > 1:
-                cr.save()
-                cr.set_line_width(1.5)
-                cr.set_dash([6, 4])
-                cr.set_source_rgb(0.2, 0.45, 0.9)
-                for k, (lx, ly) in enumerate(self._lasso):
-                    sx, sy = self.to_screen(i, lx, ly)
-                    (cr.move_to if k == 0 else cr.line_to)(sx, sy)
-                cr.close_path()
-                cr.stroke_preserve()
-                cr.set_source_rgba(0.2, 0.45, 0.9, 0.06)
-                cr.fill()
-                cr.restore()
-        if self.selection:
+            snapshot.push_clip(_rect(x, y, pw, ph))
+            if c is None:
+                bg = page.background.color
+                snapshot.append_color(_rgba(bg[0], bg[1], bg[2]), _rect(x, y, pw, ph))
+            else:
+                k = self.zoom / c.scale  # logical px per cache pixel
+                cw = c.surface.get_width() * k
+                filt = Gsk.ScalingFilter.TRILINEAR if k < 0.7 else Gsk.ScalingFilter.LINEAR
+                for si in range(len(c.strips)):
+                    sy = y + si * STRIP * k
+                    sh = min(STRIP, c.surface.get_height() - si * STRIP) * k
+                    if sy + sh < 0 or sy > h:
+                        continue
+                    # Overlap by a fraction of a pixel to hide seams between strips.
+                    snapshot.append_scaled_texture(c.texture(si), filt, _rect(x, sy, cw, sh + 0.5))
+            if moving and page is sel_page and self._sel_tex:
+                tex, bx0, by0, bx1, by1 = self._sel_tex
+                fn, sc = self._transform_fn()
+                ax, ay = fn(bx0, by0)
+                sx, sy = self.to_screen(i, ax, ay)
+                snapshot.append_scaled_texture(tex, Gsk.ScalingFilter.LINEAR,
+                                               _rect(sx, sy, (bx1 - bx0) * sc * self.zoom,
+                                                     (by1 - by0) * sc * self.zoom))
+            snapshot.pop()
+        self._snapshot_overlays(snapshot, w, h)
+        if self._text_editor:
+            self.snapshot_child(self._text_editor["view"], snapshot)
+
+    def _snapshot_overlays(self, snapshot, w, h):
+        if self._ink_layer is not None and self._ink_box:
+            x0, y0, x1, y1 = self._ink_box
+            x0, y0 = max(0, math.floor(x0)), max(0, math.floor(y0))
+            x1, y1 = min(w, math.ceil(x1)), min(h, math.ceil(y1))
+            if x1 > x0 and y1 > y0:
+                cr = snapshot.append_cairo(_rect(x0, y0, x1 - x0, y1 - y0))
+                cr.rectangle(x0, y0, x1 - x0, y1 - y0)
+                cr.clip()
+                sf = self.get_scale_factor()
+                cr.scale(1 / sf, 1 / sf)
+                cr.set_source_surface(self._ink_layer, 0, 0)
+                cr.paint_with_alpha(0.45 if self._ink_alpha_hl else 1.0)
+        # Each overlay gets its own tightly bounded cairo node, so e.g. moving the
+        # eraser cursor only re-rasterises a few pixels.
+        if self._mode == "lasso" and self._page is not None and len(self._lasso) > 1:
+            i = self.page_index(self._page)
+            pts = [self.to_screen(i, lx, ly) for lx, ly in self._lasso]
+            bx0, by0 = min(p[0] for p in pts) - 3, min(p[1] for p in pts) - 3
+            bx1, by1 = max(p[0] for p in pts) + 3, max(p[1] for p in pts) + 3
+            cr = snapshot.append_cairo(_rect(bx0, by0, bx1 - bx0, by1 - by0))
+            cr.set_line_width(1.5)
+            cr.set_dash([6, 4])
+            cr.set_source_rgb(0.2, 0.45, 0.9)
+            for k, (sx, sy) in enumerate(pts):
+                (cr.move_to if k == 0 else cr.line_to)(sx, sy)
+            cr.close_path()
+            cr.stroke_preserve()
+            cr.set_source_rgba(0.2, 0.45, 0.9, 0.06)
+            cr.fill()
+        if self.selection and self.page_index(self.selection["page"]) >= 0:
+            x0, y0, x1, y1 = self._selection_screen_box()
+            m = HANDLE + 8
+            cr = snapshot.append_cairo(_rect(x0 - m, y0 - m, x1 - x0 + 2 * m, y1 - y0 + 2 * m))
             self._draw_selection(cr)
         if self._hover and self.tools.tool == "eraser" and self._mode in (None, "erase"):
             sx, sy = self._hover
+            r = self.tools.eraser_size * self.zoom
+            cr = snapshot.append_cairo(_rect(sx - r - 2, sy - r - 2, 2 * r + 4, 2 * r + 4))
             cr.set_source_rgba(0.3, 0.3, 0.35, 0.8)
             cr.set_line_width(1)
-            cr.arc(sx, sy, self.tools.eraser_size * self.zoom, 0, 2 * math.pi)
+            cr.arc(sx, sy, r, 0, 2 * math.pi)
             cr.stroke()
+
+    # -- live ink: drawn incrementally into a screen-sized layer
+
+    def _ink_begin(self):
+        sf = self.get_scale_factor()
+        w, h = max(1, self.get_width()), max(1, self.get_height())
+        layer = cairo.ImageSurface(cairo.FORMAT_ARGB32, w * sf, h * sf)
+        layer.set_device_scale(sf, sf)
+        self._ink_layer = layer
+        self._ink_cr = cairo.Context(layer)
+        self._ink_cr.set_line_cap(cairo.LINE_CAP_ROUND)
+        self._ink_cr.set_line_join(cairo.LINE_JOIN_ROUND)
+        self._ink_box = None
+        st = self._live_stroke()
+        self._ink_alpha_hl = st.tool == "highlighter"
+        self._ink_style = st
+        self._ink_drawn = 0
+        self._ink_extend()
+
+    def _ink_extend(self):
+        """Draw the not yet drawn segments of the live stroke into the ink layer."""
+        if self._ink_layer is None:
+            return
+        st = self._ink_style
+        pts = self._points
+        cr = self._ink_cr
+        i = self._page_index
+        r, g, b = st.color[:3]
+        cr.set_source_rgb(r, g, b)
+        start = max(1, self._ink_drawn)
+        if len(pts) == 1 and self._ink_drawn == 0:
+            sx, sy = self.to_screen(i, pts[0][0], pts[0][1])
+            w = self._ink_width(st, pts[0][2])
+            cr.arc(sx, sy, w / 2, 0, 2 * math.pi)
+            cr.fill()
+            self._grow_ink_box(sx, sy, sx, sy, w)
+            self._ink_drawn = 1
+            return
+        for k in range(start, len(pts)):
+            a, b_ = pts[k - 1], pts[k]
+            ax, ay = self.to_screen(i, a[0], a[1])
+            bx, by = self.to_screen(i, b_[0], b_[1])
+            w = self._ink_width(st, (a[2] + b_[2]) / 2)
+            cr.set_line_width(w)
+            cr.move_to(ax, ay)
+            cr.line_to(bx, by)
+            cr.stroke()
+            self._grow_ink_box(ax, ay, bx, by, w)
+        self._ink_drawn = len(pts)
+
+    def _ink_width(self, st, p):
+        # Same width model as render.draw_stroke, so the stroke doesn't jump when committed.
+        base = st.width if st.tool == "highlighter" or st.style == "ball" else st.width * (0.35 + 0.9 * p)
+        return max(0.8, base * self.zoom)
+
+    def _grow_ink_box(self, ax, ay, bx, by, w):
+        m = w / 2 + 2
+        box = (min(ax, bx) - m, min(ay, by) - m, max(ax, bx) + m, max(ay, by) + m)
+        b = self._ink_box
+        self._ink_box = box if b is None else (min(b[0], box[0]), min(b[1], box[1]), max(b[2], box[2]),
+                                               max(b[3], box[3]))
+
+    def _ink_end(self):
+        self._ink_layer = None
+        self._ink_cr = None
+        self._ink_box = None
 
     def _live_stroke(self):
         t = self.tools
@@ -479,6 +703,25 @@ class NotebookCanvas(Gtk.Widget):
         if t.tool == "highlighter":
             return Stroke(self._points, t.hl_color, t.hl_width, "highlighter")
         return Stroke(self._points, t.pen_color, t.pen_width, "pen", t.pen_style)
+
+    def _make_selection_texture(self):
+        """Render the selection once; while it is dragged only this texture moves."""
+        els = self.selected_elements()
+        if not els:
+            self._sel_tex = None
+            return
+        x0, y0, x1, y1 = bbox_union(e.bbox() for e in els)
+        scale = self.zoom * self.get_scale_factor()
+        cap = math.sqrt(8_000_000 / max(1.0, (x1 - x0) * (y1 - y0)))
+        scale = min(scale, cap)
+        w, h = max(1, int((x1 - x0) * scale) + 2), max(1, int((y1 - y0) * scale) + 2)
+        surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, w, h)
+        cr = cairo.Context(surf)
+        cr.scale(scale, scale)
+        cr.translate(-x0, -y0)
+        for el in els:
+            render.draw_element(cr, el, self.res)
+        self._sel_tex = (render.surface_to_texture(surf), x0, y0, x0 + w / scale, y0 + h / scale)
 
     def _selection_screen_box(self):
         sel = self.selection
@@ -566,6 +809,7 @@ class NotebookCanvas(Gtk.Widget):
         return [(x, y, None if p is None else min(1.0, max(0.0, p))) for x, y, p in pts]
 
     def _on_drag_begin(self, g, sx, sy):
+        self._stop_kinetic()
         self.grab_focus()
         ev, source, tool_type, pressure = self._event_info(g)
         button = g.get_current_button()
@@ -583,6 +827,8 @@ class NotebookCanvas(Gtk.Widget):
         if button == 2 or (is_touch and (not self.tools.finger_draw or self._stylus_seen)):
             self._mode = "pan"
             self._pan_start = (self.hadj.get_value(), self.vadj.get_value())
+            self._pan_samples = []
+            self._pan_kinetic = is_touch
             return
         if button == 3 and not is_pen:
             g.set_state(Gtk.EventSequenceState.DENIED)
@@ -605,6 +851,7 @@ class NotebookCanvas(Gtk.Widget):
                 self._mode = hit
                 self._sel_offset = (0.0, 0.0)
                 self._sel_scale = 1.0
+                self._make_selection_texture()
                 if hit == "scale":
                     self._sel_anchor = self._scale_anchor
                 return
@@ -617,9 +864,12 @@ class NotebookCanvas(Gtk.Widget):
             self._mode = "ink"
             self._points = [(px, py, p)]
             self._pressured = pressure is not None
+            self._ink_begin()
         elif tool == "shape":
             self._mode = "shape"
             self._points = [(px, py, 0.5)]
+            self._pressured = False
+            self._ink_begin()
         elif tool == "eraser":
             self._mode = "erase"
             self._token = self.doc.begin([page])
@@ -639,6 +889,7 @@ class NotebookCanvas(Gtk.Widget):
             hx, vy = self._pan_start
             self.hadj.set_value(hx - dx)
             self.vadj.set_value(vy - dy)
+            self._pan_sample(dx, dy)
             return
         if self._mode is None or self._page is None and self._mode not in ("move", "scale"):
             return
@@ -675,13 +926,18 @@ class NotebookCanvas(Gtk.Widget):
                 self._erase_at(px, py)
             elif self._mode == "lasso":
                 self._lasso.append((px, py))
+        if self._mode in ("ink", "shape"):
+            self._ink_extend()
         self.queue_draw()
 
     def _on_drag_end(self, g, dx, dy):
         mode = self._mode
         self._mode = None
+        if mode == "pan" and self._pan_kinetic:
+            self._start_kinetic()
         if mode == "ink" or mode == "shape":
             self._finish_ink(mode)
+            self._ink_end()
         elif mode == "erase":
             if self._erased:
                 self.doc.commit(self._token)
@@ -691,6 +947,7 @@ class NotebookCanvas(Gtk.Widget):
             self._finish_lasso()
         elif mode in ("move", "scale"):
             self._finish_transform()
+            self._sel_tex = None
         elif mode == "text":
             sx, sy = self._drag_start[0] + dx, self._drag_start[1] + dy
             self._start_text(sx, sy)
@@ -707,6 +964,8 @@ class NotebookCanvas(Gtk.Widget):
         self._page = None
         self._points = []
         self._lasso = []
+        self._ink_end()
+        self._sel_tex = None
         self.queue_draw()
 
     def _on_motion(self, ctl, x, y):
@@ -753,7 +1012,7 @@ class NotebookCanvas(Gtk.Widget):
         page.elements.extend(elements)
         self.doc.commit(token)
         if any(e.kind == "image" for e in elements):
-            self._cache.pop(page.id, None)
+            self.invalidate(page)
         else:
             self._paint_onto_cache(page, elements, old)
         self.queue_draw()
@@ -911,7 +1170,7 @@ class NotebookCanvas(Gtk.Widget):
                 out.append(e)
         page.elements = out
         self.doc.commit(token)
-        self._cache.pop(page.id, None)
+        self.invalidate(page)
         self.queue_draw()
         self.emit("changed")
 
@@ -985,25 +1244,40 @@ class NotebookCanvas(Gtk.Widget):
                     el = e
                     break
         t = self.tools
+        lines = render.paper_lines(page) if t.text_on_lines else None
+        line_h = 0.0
         if el is None:
-            w = min(page.width * 0.6, page.width - px - 30)
+            if lines:
+                # Snap to the ruled line under the click: the text row is the band above that line.
+                step, y0, margin = lines
+                row = max(0, math.ceil((py - y0) / step))
+                el_y = y0 + (row - 1) * step
+                line_h = step
+                size = step * 0.62
+                if page.background.kind in ("lined", "narrow") and px < margin + step * 0.4:
+                    px = margin + step * 0.4
+            else:
+                el_y = py - t.text_size * 0.7
+                size = t.text_size
+            w = min(page.width * 0.75, page.width - px - 30)
             if w < 120:
                 px = max(10, page.width - 30 - 300)
                 w = 300
-            el_x, el_y, el_w = px, py - t.text_size * 0.7, w
-            size, color, text = t.text_size, t.text_color, ""
+            el_x, el_w = px, w
+            color, text = t.text_color, ""
         else:
             el_x, el_y, el_w, size, color, text = el.x, el.y, el.w, el.size, el.color, el.text
-        self.open_text_editor(page, el, el_x, el_y, el_w, size, color, text)
+            line_h = el.line_h
+        self.open_text_editor(page, el, el_x, el_y, el_w, size, color, text, line_h)
 
-    def open_text_editor(self, page, el, x, y, w, size, color, text):
+    def open_text_editor(self, page, el, x, y, w, size, color, text, line_h=0.0):
         tv = Gtk.TextView()
         tv.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
         tv.add_css_class("wn-text-editor")
         tv.get_buffer().set_text(text)
         tv.set_parent(self)
         self._text_editor = {"page": page, "el": el, "x": x, "y": y, "w": w, "size": size,
-                             "color": color, "view": tv, "css": None}
+                             "color": color, "view": tv, "css": None, "line_h": line_h}
         key = Gtk.EventControllerKey()
         key.connect("key-pressed", self._on_text_key)
         tv.add_controller(key)
@@ -1030,6 +1304,19 @@ class NotebookCanvas(Gtk.Widget):
         ctx.add_provider(css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 1)
         te["css"] = css
         te["zoom"] = self.zoom
+        if te.get("line_h"):
+            # Match the ruled lines while typing: fixed pitch, baseline just above each line.
+            tv = te["view"]
+            fd = Pango.FontDescription.from_string("Sans")
+            fd.set_absolute_size(te["size"] * self.zoom * Pango.SCALE)
+            m = tv.get_pango_context().get_metrics(fd, None)
+            asc = m.get_ascent() / Pango.SCALE
+            nat = asc + m.get_descent() / Pango.SCALE
+            pitch = te["line_h"] * self.zoom
+            above = max(0, round(pitch * (1 - render.TEXT_BASELINE) - asc))
+            tv.set_pixels_above_lines(above)
+            tv.set_pixels_below_lines(max(0, round(pitch - nat - above)))
+            tv.set_pixels_inside_wrap(max(0, round(pitch - nat)))
 
     def _place_text_editor(self):
         te = self._text_editor
@@ -1044,7 +1331,7 @@ class NotebookCanvas(Gtk.Widget):
         w = max(40, int(te["w"] * self.zoom))
         tv = te["view"]
         _, nat, _, _ = tv.measure(Gtk.Orientation.VERTICAL, w)
-        h = max(nat, int(te["size"] * self.zoom * 1.5))
+        h = max(nat, int((te.get("line_h") or te["size"] * 1.5) * self.zoom))
         te["rect"] = (int(sx), int(sy), w, h)
         self.queue_allocate()
         self.queue_draw()
@@ -1072,14 +1359,15 @@ class NotebookCanvas(Gtk.Widget):
         te["view"].unparent()
         page, el = te["page"], te["el"]
         if el is None and text:
-            self.add_elements(page, [Text(text, te["x"], te["y"], te["w"], te["size"], te["color"])])
+            self.add_elements(page, [Text(text, te["x"], te["y"], te["w"], te["size"], te["color"],
+                                          line_h=te.get("line_h", 0.0))])
         elif el is not None:
             if not text:
                 self.replace_elements(page, {el.id: None})
             elif text != el.text:
-                self.replace_elements(page, {el.id: Text(text, el.x, el.y, el.w, el.size, el.color, el.font)})
+                self.replace_elements(page, {el.id: el.with_text(text)})
             else:
-                self._cache.pop(page.id, None)
+                self.invalidate(page)
         self.queue_draw()
 
     def do_measure(self, orientation, for_size):

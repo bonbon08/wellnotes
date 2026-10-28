@@ -1,18 +1,19 @@
 # Maintainer: Jan Schmitt <mail at jan-schmitt dot eu>
 pkgname=wellnotes
-pkgver=0.2.0
+pkgver=0.3.0
 pkgrel=1
 pkgdesc="Handwritten notes for Linux (GTK 4) – compatible with .goodnotes files, Markdown/Obsidian import, Nextcloud/Google Drive sync"
 arch=('any')
 url="https://github.com/bonbon08/wellnotes"
 license=('GPL-3.0-or-later')
-depends=('python' 'python-gobject' 'python-cairo' 'gtk4' 'libadwaita' 'poppler-glib' 'pango' 'gdk-pixbuf2')
+depends=('python' 'python-gobject' 'python-cairo' 'gtk4' 'libadwaita' 'poppler-glib' 'pango' 'gdk-pixbuf2' 'librsvg')
 makedepends=('python-build' 'python-installer' 'python-setuptools' 'python-wheel')
-optdepends=('libsecret: store sync passwords in the system keyring'
+optdepends=('python-matplotlib: LaTeX formulas in Markdown notes'
+            'libsecret: store sync passwords in the system keyring'
             'gnome-online-accounts: Google Drive sign-in via GNOME Online Accounts'
             'gnome-keyring: keyring backend for libsecret')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('f5030bc125d24075fc75a15934da7b17681a2b57d5786ca5b1fa857c86c44a77')
+sha256sums=('SKIP')
 
 build() {
   cd "$pkgname-$pkgver"

@@ -239,13 +239,40 @@ def text_layout(cr, t):
     return layout
 
 
+def paper_lines(page):
+    """(line spacing, y of the first ruled line, left margin) of lined/grid/dotted paper, else None."""
+    bg = page.background
+    if bg.kind in ("lined", "narrow"):
+        step = LINE_SPACING if bg.kind == "lined" else LINE_SPACING * 0.75
+        return step, step * 3.5, step * 3.2
+    if bg.kind in ("grid", "dotted"):
+        step = LINE_SPACING * 0.85
+        return step, (page.height % step) / 2, (page.width % step) / 2
+    return None
+
+
+TEXT_BASELINE = 0.24  # baseline sits this fraction of a line above the ruled line
+
+
 def draw_text(cr, t):
     cr.save()
     layout = text_layout(cr, t)
-    t.h = layout.get_pixel_extents()[1].height + t.size * 0.3
-    cr.move_to(t.x, t.y)
     cr.set_source_rgba(*t.color)
-    PangoCairo.show_layout(cr, layout)
+    if t.line_h:
+        # One text line per ruled line: baseline just above the line.
+        it = layout.get_iter()
+        k = 0
+        while True:
+            cr.move_to(t.x, t.y + (k + 1) * t.line_h - t.line_h * TEXT_BASELINE)
+            PangoCairo.show_layout_line(cr, it.get_line_readonly())
+            k += 1
+            if not it.next_line():
+                break
+        t.h = k * t.line_h
+    else:
+        t.h = layout.get_pixel_extents()[1].height + t.size * 0.3
+        cr.move_to(t.x, t.y)
+        PangoCairo.show_layout(cr, layout)
     cr.restore()
 
 

@@ -12,17 +12,22 @@
 
 ## Funktionen
 
-- **Schreiben wie auf Papier.** Füller mit Druckstufen oder Kuli, Textmarker, Radierer (ganzer Strich oder präzise), Formerkennung, Lasso zum Verschieben, Skalieren und Umfärben, Textfelder und Bilder
+- **Schreiben wie auf Papier.**
+  - Füller mit Druckstufen oder Kuli, frei einstellbare Stärken, Textmarker
+  - Radierer (ganzer Strich oder präzise), Formerkennung, Lasso zum Verschieben, Skalieren und Umfärben
+  - Textfelder (auf Wunsch genau auf den Papierlinien) und Bilder
+- **Flüssig auch auf älteren Tablets.** GPU-Texturen, inkrementelles Zeichnen und Rendern im Hintergrund
 - **Stift-Unterstützung.** Wacom, Huion, XP-Pen, Surface-Pen und andere Grafiktabletts:
   - Druck steuert die Strichstärke.
   - Die Radierer-Spitze und die Stifttaste radieren.
-  - Handflächenerkennung: Finger scrollen und zoomen.
-- **Notizbücher.** Endlos scrollbare Seiten, Seitenübersicht, Papiervorlagen (blanko, liniert, kariert, gepunktet), Umschläge, Ordner, Suche, Undo/Redo, Autosave
+  - Handflächenerkennung: Finger scrollen (mit Schwung) und zoomen.
+  - Wischgesten schließen nie versehentlich ein Heft.
+- **Notizbücher.** Endlos scrollbare Seiten, Seitenübersicht, Vollbildmodus, Papiervorlagen (blanko, liniert, kariert, gepunktet), Umschläge, Ordner, Suche, Undo/Redo, Autosave
 - **`.goodnotes` lesen und schreiben.** Das Containerformat von GoodNotes 6 wurde zurückentwickelt ([Spezifikation](docs/goodnotes-format.md)).
 - **Importieren.**
   - PDF, Bilder
-  - Markdown: wird schön gesetzt und lässt sich mit dem Stift beschreiben
-  - **Obsidian-Vaults** mit Wikilinks, Einbettungen und Callouts
+  - Markdown: wird schön gesetzt, **inklusive LaTeX-Formeln** (auch Matrizen), und lässt sich mit dem Stift beschreiben
+  - **Obsidian-Vaults** mit Wikilinks, Bildern, Einbettungen und Callouts
   - Logseq-/Joplin-Ordner, **Notion**-ZIP-Exporte
 - **Synchronisieren.** Mit **Nextcloud/WebDAV**, **Google Drive** oder einem beliebigen Ordner, in beide Richtungen und mit Konfliktkopien
 - **Exportieren.** Als Vektor-PDF oder `.goodnotes`
@@ -45,10 +50,10 @@ Das [PKGBUILD](packaging/arch/PKGBUILD) baut die veröffentlichte Version aus de
 
 ### Aus dem Quellcode (jede Distribution)
 
-Benötigt: Python ≥ 3.10, PyGObject, pycairo, GTK 4, libadwaita ≥ 1.5, Poppler-GLib.
+Benötigt: Python ≥ 3.10, PyGObject, pycairo, GTK 4, libadwaita ≥ 1.5, Poppler-GLib, librsvg; optional Matplotlib für LaTeX-Formeln.
 
 ```bash
-# Arch:          sudo pacman -S python-gobject python-cairo gtk4 libadwaita poppler-glib
+# Arch:          sudo pacman -S python-gobject python-cairo gtk4 libadwaita poppler-glib python-matplotlib
 # Fedora:        sudo dnf install python3-gobject python3-cairo gtk4 libadwaita poppler-glib
 # Debian/Ubuntu: sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-poppler-0.18
 git clone https://github.com/bonbon08/wellnotes.git && cd wellnotes
@@ -64,7 +69,7 @@ git clone https://github.com/bonbon08/wellnotes.git && cd wellnotes
 
 ## Status und Grenzen
 
-WellNotes ist ein junges Projekt (Version 0.2).
+WellNotes ist ein junges Projekt (Version 0.3).
 - **Lesen von `.goodnotes`**: an einer echten Datei geprüft.
 - **Schreiben**: Ob GoodNotes selbst die von WellNotes geschriebenen Dateien öffnet, ist noch nicht getestet. Rückmeldungen sind sehr willkommen.
 - **Weitere Grenzen**: stehen im [Format-Dokument](docs/goodnotes-format.md#grenzen).

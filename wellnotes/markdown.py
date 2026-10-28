@@ -7,13 +7,16 @@ block quotes, fenced and indented code blocks, horizontal rules and GFM tables.
 Obsidian extensions: ``[[wikilinks|alias]]``, embeds ``![[image.png|300]]``,
 ``![[Other note]]`` (transcluded) and ``![[file.pdf]]`` (appended as pages),
 callouts ``> [!note] Title``, ``==highlights==``, ``#tags``, ``%%comments%%``,
-footnotes ``[^1]`` and ``$math$`` / ``$$math$$`` (shown verbatim).
+footnotes ``[^1]`` and LaTeX ``$math$`` / ``$$math$$`` (see mathrender.py).
 """
 
+import base64
 import html
 import io
 import os
 import re
+import urllib.parse
+import urllib.request
 
 import cairo
 import gi
@@ -194,7 +197,7 @@ def parse_blocks(lines):
                     if rest.strip():
                         math.append(rest)
                     i += 1
-            blocks.append(("code", "\n".join(math).strip(), "math"))
+            blocks.append(("math", "\n".join(math).strip()))
             continue
         if "|" in line and i + 1 < n and _TABLE_SEP.match(lines[i + 1]) and "-" in lines[i + 1]:
             flush()
@@ -265,20 +268,71 @@ def parse_blocks(lines):
         para.append(line)
         i += 1
     flush()
-    # A paragraph consisting only of an image becomes an image block.
+    # Images and embeds inside paragraphs (e.g. several images on consecutive
+    # lines, or an image followed by text) become blocks of their own.
     out = []
     for b in blocks:
-        if b[0] == "para":
-            m = re.fullmatch(r"!\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+\"[^\"]*\")?\s*\)", b[1].strip())
-            if m:
-                out.append(("image", m.group(1), m.group(2)))
-                continue
-            m = _EMBED.match(b[1].strip())
-            if m:
-                out.append(("embed", m.group(1).strip(), (m.group(2) or "")[1:], m.group(3)))
-                continue
-        out.append(b)
+        if b[0] == "para" and "![" in b[1]:
+            out.extend(_split_images(b[1]))
+        else:
+            out.append(b)
     return out
+
+
+_INLINE_IMG = re.compile(r"!\[\[[^\]]+\]\]|!\[([^\]]*)\]\(\s*(<[^>]+>|[^)\s]+)(?:\s+\"[^\"]*\")?\s*\)")
+
+
+def _split_images(text):
+    out = []
+    pos = 0
+    for m in _INLINE_IMG.finditer(text):
+        before = text[pos:m.start()].strip()
+        if before:
+            out.append(("para", before))
+        tok = m.group(0)
+        if tok.startswith("![["):
+            e = _EMBED.match(tok)
+            if e:
+                out.append(("embed", e.group(1).strip(), (e.group(2) or "")[1:], e.group(3)))
+            else:
+                out.append(("para", tok))
+        else:
+            out.append(("image", m.group(1), m.group(2).strip("<>")))
+        pos = m.end()
+    rest = text[pos:].strip()
+    if rest:
+        out.append(("para", rest))
+    return out
+
+
+_remote_cache = {}
+
+
+def load_image_bytes(src, resolver):
+    """Image data for a Markdown image source: file (resolved in the vault), data: URI or http(s) URL."""
+    if src.startswith("data:"):
+        header, _, payload = src.partition(",")
+        try:
+            return base64.b64decode(payload) if ";base64" in header else urllib.parse.unquote_to_bytes(payload)
+        except ValueError:
+            return None
+    if src.startswith(("http://", "https://")):
+        if src not in _remote_cache:
+            try:
+                req = urllib.request.Request(src, headers={"User-Agent": "WellNotes"})
+                with urllib.request.urlopen(req, timeout=8) as r:
+                    _remote_cache[src] = r.read(30_000_000)
+            except Exception:  # offline or broken link: show the placeholder
+                _remote_cache[src] = None
+        return _remote_cache[src]
+    path = resolver.resolve(src) if resolver else src
+    if not path:
+        return None
+    try:
+        with open(path, "rb") as f:
+            return f.read()
+    except OSError:
+        return None
 
 
 # --------------------------------------------------------------------------
@@ -288,7 +342,16 @@ LINK_COLOR = "#1a63c6"
 CODE_BG = "#eef0f3"
 
 
-def inline_markup(text, mono="Monospace"):
+MATH_BASE = 0xE000
+MATH_MAX = 0xF8FF - MATH_BASE
+
+
+def inline_markup(text, mono="Monospace", math_pool=None):
+    """Markdown inline syntax -> Pango markup.
+
+    With ``math_pool`` (a list), each ``$formula$`` is appended to the pool and
+    replaced by a private-use character the typesetter turns into a formula.
+    """
     codes = []
 
     def code_sub(m):
@@ -347,13 +410,19 @@ def inline_markup(text, mono="Monospace"):
 
     def link_back(m):
         label, url = links[int(m.group(1))]
-        inner = inline_markup(label, mono) if label else html.escape(url)
+        inner = inline_markup(label, mono, math_pool) if label else html.escape(url)
         return '<span foreground="%s" underline="single">%s</span>' % (LINK_COLOR, inner)
 
     s = re.sub(r"\x02(\d+)\x02", link_back, s)
     s = re.sub(r"\x01(\d+)\x01", lambda m: html.escape(escapes[int(m.group(1))]), s)
-    s = re.sub(r"\x03(\d+)\x03", lambda m: '<span font_family="Serif" style="italic">%s</span>'
-               % html.escape(maths[int(m.group(1))]), s)
+    def math_back(m):
+        tex = maths[int(m.group(1))]
+        if math_pool is not None and len(math_pool) < MATH_MAX:
+            math_pool.append(tex)
+            return chr(MATH_BASE + len(math_pool) - 1)
+        return '<span font_family="Serif" style="italic">%s</span>' % html.escape(tex)
+
+    s = re.sub(r"\x03(\d+)\x03", math_back, s)
     s = re.sub(r"\x00(\d+)\x00", lambda m: '<span font_family="%s" background="%s" size="92%%"> %s </span>'
                % (mono, CODE_BG, html.escape(codes[int(m.group(1))])), s)
     return s
@@ -379,6 +448,12 @@ class _Setter:
         self.resolver = resolver
         self.pdf_embeds = pdf_embeds
         self.embed_stack = []
+        from . import mathrender
+        self.math = mathrender if mathrender.available() else None
+        self.math_pool = [] if self.math else None
+
+    def md(self, text):
+        return inline_markup(text, self.MONO, self.math_pool)
 
     # -- helpers
     def new_page(self):
@@ -406,7 +481,53 @@ class _Setter:
             lay.set_markup(markup, -1)
         except GLib.Error:
             lay.set_text(re.sub(r"<[^>]+>", "", markup), -1)
+        self._attach_maths(lay, size or self.BODY)
         return lay
+
+    def _attach_maths(self, lay, size):
+        """Reserve space for inline formulas (private-use placeholders) via shape attributes."""
+        lay._maths = []
+        if not self.math:
+            return
+        text = lay.get_text()
+        if not any(MATH_BASE <= ord(c) <= MATH_BASE + MATH_MAX for c in text):
+            return
+        attrs = lay.get_attributes() or Pango.AttrList()
+        byte = 0
+        for c in text:
+            n = len(c.encode("utf-8"))
+            k = ord(c) - MATH_BASE
+            if 0 <= k < len(self.math_pool):
+                box = self.math.layout(self.math_pool[k], size)
+                r = Pango.Rectangle()
+                r.x, r.y = 0, int(-box.ascent * Pango.SCALE)
+                r.width, r.height = int((box.w + 1.5) * Pango.SCALE), int(box.h * Pango.SCALE)
+                a = Pango.attr_shape_new(r, r)
+                a.start_index, a.end_index = byte, byte + n
+                attrs.insert(a)
+                lay._maths.append((byte, box))
+            byte += n
+        lay.set_attributes(attrs)
+        if any(box.h > size * 1.6 for _, box in lay._maths):
+            # A fixed line-height factor would clip tall formulas (matrices, fractions).
+            lay.set_line_spacing(0)
+            lay.set_spacing(int(size * 0.3 * Pango.SCALE))
+
+    def _draw_line_maths(self, lay, line, x, baseline_y):
+        for bi, box in getattr(lay, "_maths", ()):
+            if line.start_index <= bi < line.start_index + line.length:
+                pos = lay.index_to_pos(bi)
+                box.draw(self.cr, x + pos.x / Pango.SCALE + 0.75, baseline_y - box.ascent)
+
+    def show(self, lay, x, y):
+        """PangoCairo.show_layout plus inline formulas."""
+        PangoCairo.show_layout(self.cr, lay)
+        if getattr(lay, "_maths", None):
+            it = lay.get_iter()
+            while True:
+                self._draw_line_maths(lay, it.get_line_readonly(), x, y + it.get_baseline() / Pango.SCALE)
+                if not it.next_line():
+                    break
 
     def flow(self, lay, x, color=(0.1, 0.1, 0.12), line_bg=None, bar=None):
         """Draw a layout line by line, breaking pages between lines."""
@@ -435,6 +556,9 @@ class _Setter:
             self.cr.set_source_rgb(*color)
             self.cr.move_to(x, ly + (baseline - top))
             PangoCairo.show_layout_line(self.cr, it.get_line_readonly())
+            if lay._maths:
+                self._draw_line_maths(lay, it.get_line_readonly(), x, ly + (baseline - top))
+                self.cr.set_source_rgb(*color)
             last_bottom = ly + h
             if not it.next_line():
                 break
@@ -445,13 +569,13 @@ class _Setter:
         for k, b in enumerate(blocks):
             kind = b[0]
             if kind == "para":
-                self.flow(self.layout(inline_markup(b[1], self.MONO), width), x, color, bar=bar)
+                self.flow(self.layout(self.md(b[1]), width), x, color, bar=bar)
                 self.y += 4 if tight else 9
             elif kind == "heading":
                 level, text = b[1], b[2]
                 size = {1: 22, 2: 18, 3: 15, 4: 13, 5: 12, 6: 11}[level]
                 self.y += {1: 14, 2: 12, 3: 8}.get(level, 6) if self.y > self.top + 1 else 0
-                lay = self.layout(inline_markup(text, self.MONO), width, size, bold=True, spacing=1.1)
+                lay = self.layout(self.md(text), width, size, bold=True, spacing=1.1)
                 self.ensure(lay.get_pixel_extents()[1].height + 30)
                 self.flow(lay, x, (0.07, 0.07, 0.09), bar=bar)
                 if level <= 2:
@@ -482,7 +606,9 @@ class _Setter:
             elif kind == "table":
                 self._table(b, x, width)
             elif kind == "image":
-                self._image(b[1], self.resolver.resolve(b[2]) if "://" not in b[2] else None, x, width)
+                self._image(b[1], b[2], x, width)
+            elif kind == "math":
+                self._math_block(b[1], x, width)
             elif kind == "callout":
                 self._callout(b, x, width)
             elif kind == "embed":
@@ -506,7 +632,7 @@ class _Setter:
         title = title or kind.capitalize()
         self.y += 4
         lay = self.layout('<span foreground="#%02x%02x%02x">%s</span>' % (
-            int(color[0] * 255), int(color[1] * 255), int(color[2] * 255), inline_markup(title, self.MONO)),
+            int(color[0] * 255), int(color[1] * 255), int(color[2] * 255), self.md(title)),
             width - 24, bold=True)
         self.ensure(lay.get_pixel_extents()[1].height + 20)
         start_y = self.y
@@ -601,28 +727,51 @@ class _Setter:
         pad = 6
         allrows = [header] + rows
         natural = [0.0] * ncol
-        for r in allrows:
+        minimum = [0.0] * ncol  # longest unbreakable word per column
+        images = {}  # (row, col) -> cairo surface for cells that are just an image
+        for ri, r in enumerate(allrows):
             for c in range(ncol):
                 txt = r[c] if c < len(r) else ""
-                lay = self.layout(inline_markup(txt, self.MONO), 10000, self.BODY - 0.5, bold=r is header)
+                surf = self._cell_image(txt)
+                if surf is not None:
+                    images[ri, c] = surf
+                    natural[c] = max(natural[c], min(surf.get_width() * 0.75, 200) + 2 * pad)
+                    minimum[c] = max(minimum[c], min(surf.get_width() * 0.75, 60) + 2 * pad)
+                    continue
+                markup = self.md(txt)
+                lay = self.layout(markup, 10000, self.BODY - 0.5, bold=r is header)
                 natural[c] = max(natural[c], lay.get_pixel_extents()[1].width + 2 * pad)
-        total = sum(natural) or 1
-        if total > width:
-            widths = [max(40, width * w / total) for w in natural]
-            f = width / sum(widths)
-            widths = [w * f for w in widths]
-        else:
+                lay.set_width(Pango.SCALE)
+                lay.set_wrap(Pango.WrapMode.WORD)
+                minimum[c] = max(minimum[c], lay.get_pixel_extents()[1].width + 2 * pad)
+        if sum(natural) <= width:
             widths = natural
+        elif sum(minimum) >= width:
+            widths = [width * m / sum(minimum) for m in minimum]
+        else:
+            # Every column gets its longest word; the rest of the space follows the natural widths.
+            spare = width - sum(minimum)
+            extra = [n - m for n, m in zip(natural, minimum)]
+            total_extra = sum(extra) or 1
+            widths = [m + spare * e / total_extra for m, e in zip(minimum, extra)]
         tw = sum(widths)
         self.y += 4
         for ri, r in enumerate(allrows):
             lays = []
+            heights = []
             for c in range(ncol):
                 txt = r[c] if c < len(r) else ""
                 al = aligns[c] if c < len(aligns) else "left"
-                lays.append(self.layout(inline_markup(txt, self.MONO), widths[c] - 2 * pad, self.BODY - 0.5,
-                                        bold=ri == 0, align=al))
-            rh = max(l.get_pixel_extents()[1].height for l in lays) + 2 * pad
+                surf = images.get((ri, c))
+                if surf is not None:
+                    sc = min((widths[c] - 2 * pad) / surf.get_width(), 0.75)
+                    lays.append((surf, sc))
+                    heights.append(surf.get_height() * sc)
+                    continue
+                lay = self.layout(self.md(txt), widths[c] - 2 * pad, self.BODY - 0.5, bold=ri == 0, align=al)
+                lays.append(lay)
+                heights.append(lay.get_pixel_extents()[1].height)
+            rh = max(heights) + 2 * pad
             self.ensure(rh)
             if ri == 0:
                 self.cr.set_source_rgb(0.94, 0.95, 0.97)
@@ -634,9 +783,18 @@ class _Setter:
                 self.cr.fill()
             cx = x
             for c, lay in enumerate(lays):
-                self.cr.set_source_rgb(0.1, 0.1, 0.12)
-                self.cr.move_to(cx + pad, self.y + pad)
-                PangoCairo.show_layout(self.cr, lay)
+                if isinstance(lay, tuple):
+                    surf, sc = lay
+                    self.cr.save()
+                    self.cr.translate(cx + pad, self.y + pad)
+                    self.cr.scale(sc, sc)
+                    self.cr.set_source_surface(surf, 0, 0)
+                    self.cr.paint()
+                    self.cr.restore()
+                else:
+                    self.cr.set_source_rgb(0.1, 0.1, 0.12)
+                    self.cr.move_to(cx + pad, self.y + pad)
+                    self.show(lay, cx + pad, self.y + pad)
                 cx += widths[c]
             self.cr.set_source_rgb(0.82, 0.83, 0.86)
             self.cr.set_line_width(0.8)
@@ -650,10 +808,56 @@ class _Setter:
             self.y += rh
         self.y += 12
 
-    def _image(self, alt, path, x, width, max_w=None):
+    def _cell_image(self, txt):
+        """Surface for a table cell that consists of a single image, else None."""
+        m = _INLINE_IMG.fullmatch(txt.strip())
+        if not m:
+            return None
+        tok = m.group(0)
+        if tok.startswith("![["):
+            e = _EMBED.match(tok)
+            src = e.group(1).strip() if e else None
+        else:
+            src = m.group(2).strip("<>")
+        data = load_image_bytes(src, self.resolver) if src else None
+        if not data:
+            return None
         try:
-            pb = GdkPixbuf.Pixbuf.new_from_file(path).apply_embedded_orientation()
-        except (GLib.Error, TypeError):
+            loader = GdkPixbuf.PixbufLoader()
+            loader.write(data)
+            loader.close()
+            from .render import pixbuf_to_surface
+            return pixbuf_to_surface(loader.get_pixbuf().apply_embedded_orientation())
+        except (GLib.Error, AttributeError, TypeError):
+            return None
+
+    def _math_block(self, tex, x, width):
+        if not self.math:
+            lay = self.layout(html.escape(tex), width - 20, self.BODY - 1.5, self.MONO, spacing=1.15)
+            self.flow(lay, x + 10, (0.15, 0.17, 0.2), line_bg=(x, width, (0.95, 0.955, 0.965)))
+            self.y += 14
+            return
+        box = self.math.display(tex, self.BODY + 1.5)
+        s = min(1.0, width / box.w) if box.w else 1.0
+        self.y += 4
+        self.ensure(box.h * s + 8)
+        self.cr.save()
+        self.cr.translate(x + (width - box.w * s) / 2, self.y)
+        self.cr.scale(s, s)
+        box.draw(self.cr, 0, 0)
+        self.cr.restore()
+        self.y += box.h * s + 12
+
+    def _image(self, alt, src, x, width, max_w=None):
+        data = load_image_bytes(src, self.resolver) if src else None
+        try:
+            if not data:
+                raise ValueError("no data")
+            loader = GdkPixbuf.PixbufLoader()
+            loader.write(data)
+            loader.close()
+            pb = loader.get_pixbuf().apply_embedded_orientation()
+        except (GLib.Error, ValueError, TypeError, AttributeError):
             self.flow(self.layout("<i>[Bild: %s]</i>" % html.escape(alt or ""), width), x, (0.45, 0.45, 0.5))
             self.y += 8
             return

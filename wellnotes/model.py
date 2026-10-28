@@ -101,39 +101,52 @@ class Image:
 
 
 class Text:
+    """A text box.  With ``line_h`` > 0 the lines sit on the ruled lines of the paper."""
+
     kind = "text"
 
-    def __init__(self, text, x, y, w, size=28.0, color=(0, 0, 0, 1), font="Sans", eid=None):
+    def __init__(self, text, x, y, w, size=28.0, color=(0, 0, 0, 1), font="Sans", eid=None, line_h=0.0):
         self.id = eid or new_id()
         self.text = text
         self.x, self.y, self.w = x, y, w
         self.size = size
         self.color = tuple(color)
         self.font = font
-        self.h = size * 1.5  # updated by the renderer after layout
+        self.line_h = line_h
+        self.h = line_h or size * 1.5  # updated by the renderer after layout
 
     def bbox(self):
-        return (self.x, self.y, self.x + self.w, self.y + max(self.h, self.size * 1.5))
+        return (self.x, self.y, self.x + self.w, self.y + max(self.h, self.line_h or self.size * 1.5))
+
+    def _copy(self, **kw):
+        d = dict(text=self.text, x=self.x, y=self.y, w=self.w, size=self.size, color=self.color, font=self.font,
+                 line_h=self.line_h)
+        d.update(kw)
+        t = Text(d["text"], d["x"], d["y"], d["w"], d["size"], d["color"], d["font"], line_h=d["line_h"])
+        t.h = self.h * (d["size"] / self.size if self.size else 1)
+        return t
 
     def transformed(self, fn, scale=1.0):
         x, y = fn(self.x, self.y)
-        t = Text(self.text, x, y, self.w * scale, self.size * scale, self.color, self.font)
-        t.h = self.h * scale
-        return t
+        return self._copy(x=x, y=y, w=self.w * scale, size=self.size * scale, line_h=self.line_h * scale)
 
     def recolored(self, color):
-        t = Text(self.text, self.x, self.y, self.w, self.size, tuple(color[:3]) + (1,), self.font)
-        t.h = self.h
-        return t
+        return self._copy(color=tuple(color[:3]) + (1,))
+
+    def with_text(self, text):
+        return self._copy(text=text)
 
     def to_json(self):
-        return {"kind": "text", "id": self.id, "text": self.text, "x": self.x, "y": self.y, "w": self.w,
-                "size": self.size, "color": list(self.color), "font": self.font}
+        d = {"kind": "text", "id": self.id, "text": self.text, "x": self.x, "y": self.y, "w": self.w,
+             "size": self.size, "color": list(self.color), "font": self.font}
+        if self.line_h:
+            d["line_h"] = self.line_h
+        return d
 
     @classmethod
     def from_json(cls, d):
         return cls(d["text"], d["x"], d["y"], d["w"], d.get("size", 28.0), d.get("color", (0, 0, 0, 1)),
-                   d.get("font", "Sans"), d.get("id"))
+                   d.get("font", "Sans"), d.get("id"), d.get("line_h", 0.0))
 
 
 ELEMENT_TYPES = {"stroke": Stroke, "image": Image, "text": Text}

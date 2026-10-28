@@ -17,6 +17,7 @@ PATH = os.path.join(CONFIG_DIR, "settings.json")
 
 DEFAULTS = {
     "library": "",
+    "tools": {},  # per tool: list of three size presets
     "sync": {
         "provider": "none",  # none | nextcloud | gdrive | folder
         "auto": True,
