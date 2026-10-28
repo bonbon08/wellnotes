@@ -12,7 +12,7 @@ optdepends=('libsecret: store sync passwords in the system keyring'
             'gnome-online-accounts: Google Drive sign-in via GNOME Online Accounts'
             'gnome-keyring: keyring backend for libsecret')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('SKIP')
+sha256sums=('f5030bc125d24075fc75a15934da7b17681a2b57d5786ca5b1fa857c86c44a77')
 
 build() {
   cd "$pkgname-$pkgver"
