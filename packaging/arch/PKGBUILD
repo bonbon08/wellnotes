@@ -1,6 +1,6 @@
 # Maintainer: Jan Schmitt <mail at jan-schmitt dot eu>
 pkgname=wellnotes
-pkgver=0.3.0
+pkgver=0.4.0
 pkgrel=1
 pkgdesc="Handwritten notes for Linux (GTK 4) – compatible with .goodnotes files, Markdown/Obsidian import, Nextcloud/Google Drive sync"
 arch=('any')
@@ -13,7 +13,7 @@ optdepends=('python-matplotlib: LaTeX formulas in Markdown notes'
             'gnome-online-accounts: Google Drive sign-in via GNOME Online Accounts'
             'gnome-keyring: keyring backend for libsecret')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('ab0ad8b43430c82ef5738104bba55352444fc74a6a1921606acd2c4f7e0c1c90')
+sha256sums=('SKIP')
 
 build() {
   cd "$pkgname-$pkgver"

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0 – 2026-10-29
+
+- **Android-App** (Flutter, `mobile/`):
+  - Bibliothek, Notizbücher, Stift mit Druck und Radierer-Spitze, Textmarker, Radierer, Formen, Lasso, Text, Bilder
+  - Seitenübersicht, Vollbild, Text auf Linien, Größen-Vorgaben mit Regler
+  - Markdown/Obsidian-Import mit LaTeX, PDF-Import und -Export
+  - Nextcloud-Sync
+  - Liest und schreibt dieselben `.goodnotes`-Dateien wie die Linux-App
+- Markdown: `|` in Formeln und Code innerhalb von Tabellen trennt keine Spalten mehr
+
 ## 0.3.0 – 2026-10-29
 
 - Deutlich flüssigeres Schreiben auf schwachen Geräten:

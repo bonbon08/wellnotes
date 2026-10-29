@@ -97,8 +97,20 @@ class Resolver:
         return self._index.get(name) or self._index.get(name + ".md")
 
 
+def protect_table_pipes(line):
+    """``|`` inside ``$math$`` or `code` in a table row is content, not a column separator."""
+    def math(m):
+        return m.group(0).replace("|", r"\vert ")
+
+    def code(m):
+        return m.group(0).replace("|", "\\|")
+
+    line = re.sub(r"`[^`]*`", code, line)
+    return re.sub(r"(?<![\\$])\$[^$]+\$", math, line)
+
+
 def _split_row(line):
-    line = line.strip()
+    line = protect_table_pipes(line.strip())
     if line.startswith("|"):
         line = line[1:]
     if line.endswith("|") and not line.endswith("\\|"):

@@ -49,6 +49,38 @@ wellnotes/
 - **Markdown** wird zu einem PDF gesetzt und wie ein importiertes PDF als Seitenhintergrund verwendet. Dadurch ist es beschreibbar und landet sauber im `.goodnotes`-Export.
 - **Speichern** läuft in einem Thread auf einer Momentaufnahme des Dokuments (eigene `ResourceCache`-Instanz, keine geteilten Poppler-Objekte).
 
+## Android-App (`mobile/`)
+
+Die Android-App ist eine eigene Flutter-Anwendung mit demselben Dateiformat. Sie gleicht über dieselbe Sync-Logik mit der Linux-App ab.
+
+```
+mobile/lib/
+  main.dart             App-Start, Bibliotheksort, App-Zustand
+  library_screen.dart   Bibliothek, Import, Kontextmenüs
+  editor_screen.dart    Notizbuch: Werkzeugleiste, Seiten, Autosave (Isolate), Export
+  notebook_view.dart    Zeichenfläche: Stift/Touch/Maus, Gesten, Seiten-Caches, Werkzeuge
+  render.dart           Zeichnen von Papier, Strichen, Text, Bildern, PDF-Seiten (pdfrx)
+  model.dart            Datenmodell (JSON identisch zu wellnotes/model.py) + Undo
+  storage.dart          Laden/Speichern (.goodnotes + wellnotes.json), PDF-Vorlagen
+  format/               Protobuf, Apple-LZ4, tpl, GoodNotes-Container (Port von goodnotes.py)
+  markdown_import.dart  Markdown/Obsidian -> PDF (Paket pdf, Noto-Schriften)
+  math.dart             LaTeX über flutter_math_fork, offscreen gerendert
+  sync.dart             WebDAV-Sync (Port von sync.py)
+```
+
+**Bauen** (Java 27 ist für Gradle zu neu, daher JDK 21):
+
+```bash
+cd mobile
+JAVA_HOME=/usr/lib/jvm/java-21-openjdk flutter build apk --release --split-per-abi
+```
+
+**Tests:**
+- Format und Modell auf dem Rechner: `flutter test`. Die Tests nutzen `../Feinschliffe.goodnotes`, falls vorhanden.
+- Integrationstests auf Gerät oder Emulator: `flutter test integration_test/app_test.dart -d <gerät>`. Sie prüfen LaTeX, Markdown/Obsidian-Import, Zeichnen, Text auf Linien und Autosave.
+  - Mit `--dart-define=WN_HOLD=60` bleibt die App eine Minute installiert. In der Zeit lassen sich die gerenderten PNGs aus `Android/data/io.github.wellnotes.wellnotes/files/WellNotes-test` holen.
+- `tool/screenshot.sh out.png` speichert einen verkleinerten Screenshot des laufenden Emulators.
+
 ## Testen
 
 Die Tests laufen ohne Bildschirm mit dem Broadway-Backend von GTK:

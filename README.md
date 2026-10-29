@@ -1,8 +1,8 @@
 # WellNotes
 
-**Handschriftliche Notizen für Linux – nativ mit GTK 4 / libadwaita, mit Stift-Unterstützung und kompatibel mit `.goodnotes`-Dateien.**
+**Handschriftliche Notizen für Linux und Android – mit Stift-Unterstützung und kompatibel mit `.goodnotes`-Dateien.**
 
-*English: WellNotes is a native GTK 4 handwriting notes app for Linux. It opens and saves `.goodnotes` files, supports pen pressure and stylus erasers, imports PDF, Markdown, Obsidian vaults and Notion exports, and syncs with Nextcloud, Google Drive or any folder. The UI is in German.*
+*English: WellNotes is a handwriting notes app for Linux (native GTK 4) and Android (Flutter). It opens and saves `.goodnotes` files, supports pen pressure and stylus erasers, imports PDF, Markdown (with LaTeX), Obsidian vaults and Notion exports, and syncs notebooks between devices via Nextcloud, Google Drive or any folder. The UI is in German.*
 
 ![Notizbuch mit Handschrift und Seitenübersicht](docs/screenshots/editor-handwriting.png)
 
@@ -31,6 +31,11 @@
   - Logseq-/Joplin-Ordner, **Notion**-ZIP-Exporte
 - **Synchronisieren.** Mit **Nextcloud/WebDAV**, **Google Drive** oder einem beliebigen Ordner, in beide Richtungen und mit Konfliktkopien
 - **Exportieren.** Als Vektor-PDF oder `.goodnotes`
+- **Android-App.** Dieselben Notizbücher auf dem Android-Tablet: Stift mit Druck, alle Werkzeuge, Markdown/LaTeX-Import und Nextcloud-Sync mit der Linux-App ([mehr](docs/android.md))
+
+| Android-Tablet: Bibliothek | Android-Tablet: Notizbuch |
+|---|---|
+| ![Android-Bibliothek](docs/screenshots/android-library.png) | ![Android-Notizbuch](docs/screenshots/android-editor.png) |
 
 ## Installation
 
@@ -48,7 +53,16 @@ Das [PKGBUILD](packaging/arch/PKGBUILD) baut die veröffentlichte Version aus de
 - die Dateizuordnung für `.goodnotes`
 - die AppStream-Metadaten
 
-### Aus dem Quellcode (jede Distribution)
+### Android
+
+Unter [Releases](https://github.com/bonbon08/wellnotes/releases) die passende APK herunterladen und installieren (Installation aus unbekannten Quellen erlauben):
+- `wellnotes-android-arm64-v8a.apk` für fast alle aktuellen Tablets und Handys
+- `wellnotes-android-armeabi-v7a.apk` für ältere 32-Bit-Geräte
+- `wellnotes-android-universal.apk`, falls unklar (größer)
+
+Benötigt Android 7 oder neuer. Details stehen in der [Android-Anleitung](docs/android.md).
+
+### Linux aus dem Quellcode (jede Distribution)
 
 Benötigt: Python ≥ 3.10, PyGObject, pycairo, GTK 4, libadwaita ≥ 1.5, Poppler-GLib, librsvg; optional Matplotlib für LaTeX-Formeln.
 
@@ -64,12 +78,13 @@ git clone https://github.com/bonbon08/wellnotes.git && cd wellnotes
 ## Dokumentation
 
 - [Benutzerhandbuch](docs/benutzerhandbuch.md): Werkzeuge, Tastenkürzel, Import, Export, Synchronisation einrichten, Problemlösung
+- [Android-App](docs/android.md): Installation, Bedienung, Unterschiede zur Linux-Version
 - [Das `.goodnotes`-Format](docs/goodnotes-format.md): zurückentwickelte Spezifikation
 - [Entwicklung](docs/entwicklung.md): Architektur, Tests, Pakete bauen, Release
 
 ## Status und Grenzen
 
-WellNotes ist ein junges Projekt (Version 0.3).
+WellNotes ist ein junges Projekt (Version 0.4).
 - **Lesen von `.goodnotes`**: an einer echten Datei geprüft.
 - **Schreiben**: Ob GoodNotes selbst die von WellNotes geschriebenen Dateien öffnet, ist noch nicht getestet. Rückmeldungen sind sehr willkommen.
 - **Weitere Grenzen**: stehen im [Format-Dokument](docs/goodnotes-format.md#grenzen).
