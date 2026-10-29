@@ -1,5 +1,10 @@
 # Changelog
 
+## Unveröffentlicht
+
+- Linux: Der Strich erscheint jetzt sofort beim Schreiben, auch bei HiDPI- und fraktionaler Skalierung (vorher erst nach dem Absetzen des Stifts)
+- Linux: Der Live-Strich lädt pro Frame nur noch die geänderten Kacheln auf die GPU
+
 ## 0.4.0 – 2026-10-29
 
 - **Android-App** (Flutter, `mobile/`):

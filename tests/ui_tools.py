@@ -3,6 +3,7 @@ import math
 import time
 
 from wellnotes import fileformat, goodnotes
+from wellnotes.canvas import _rect
 
 LIB = os.environ["WELLNOTES_LIBRARY"]
 W = lambda: None  # noqa: E731
@@ -127,6 +128,34 @@ def s_perf():
     check(total / len(pts) < 0.02, "live ink under 20 ms per update")
 
 
+def s_hidpi_live():
+    """The live stroke must be visible while drawing at every scale factor (it used to be
+    shrunk a second time and clipped away at scale 2, so it only showed after lifting)."""
+    c = app.window.editors[0].canvas
+    app.window.editors[0]._select_tool("pen")
+    renderer = app.window.get_native().get_renderer()
+    for sf in (1, 2):
+        c.get_scale_factor = lambda sf=sf: sf
+        g = Gesture()
+        x0, y0 = 300, 300
+        c._on_drag_begin(g, x0, y0)
+        for i in range(1, 80):
+            c._on_drag_update(g, i * 4, 0)
+        s = Gtk.Snapshot()
+        c._snapshot_overlays(s, c.get_width(), c.get_height())
+        tex = renderer.render_texture(s.to_node(), _rect(0, 0, c.get_width(), c.get_height()))
+        dl = Gdk.TextureDownloader.new(tex)
+        dl.set_format(Gdk.MemoryFormat.B8G8R8A8_PREMULTIPLIED)
+        data, stride = dl.download_bytes()
+        data = data.get_data()
+        alpha = max(data[(y0 + dy) * stride + (x0 + 150) * 4 + 3] for dy in (-1, 0, 1))
+        check(alpha > 200, "live stroke visible while drawing at scale %d" % sf)
+        c._on_drag_end(g, 79 * 4, 0)
+        del c.get_scale_factor
+    ed = app.window.editors[0]
+    ed.undo(); ed.undo()
+
+
 def s_close():
     ed = app.window.editors[0]
     ed.canvas.scroll_to_page(0)
@@ -141,4 +170,4 @@ def s_check():
     check(len(g.pages) == 4, "GoodNotes view: 4 pages")
 
 
-steps += [s_new, W, s_tools, W, lambda: shot("tools"), s_perf, W, lambda: shot("perf"), s_close, W, W, s_check]
+steps += [s_new, W, s_tools, W, lambda: shot("tools"), s_hidpi_live, s_perf, W, lambda: shot("perf"), s_close, W, W, s_check]

@@ -21,6 +21,7 @@ PAD = 40.0  # page units around/between pages
 MAX_CACHE_PIXELS = 10_000_000
 STRIP = 256  # rows per GPU texture strip of a page cache
 HANDLE = 9  # screen px
+INK_TILE = 128  # device px per GPU texture tile of the live ink layer
 
 
 class Tools:
@@ -151,7 +152,7 @@ class NotebookCanvas(Gtk.Widget):
         self._cache = {}
         self._renderer = _Renderer(doc, self._on_rendered)
         self._ink_layer = None
-        self._ink_box = None
+        self._ink_tiles = {}
         self._sel_tex = None
         self._layout = []
         self._content = (1, 1)
@@ -587,18 +588,16 @@ class NotebookCanvas(Gtk.Widget):
             self.snapshot_child(self._text_editor["view"], snapshot)
 
     def _snapshot_overlays(self, snapshot, w, h):
-        if self._ink_layer is not None and self._ink_box:
-            x0, y0, x1, y1 = self._ink_box
-            x0, y0 = max(0, math.floor(x0)), max(0, math.floor(y0))
-            x1, y1 = min(w, math.ceil(x1)), min(h, math.ceil(y1))
-            if x1 > x0 and y1 > y0:
-                cr = snapshot.append_cairo(_rect(x0, y0, x1 - x0, y1 - y0))
-                cr.rectangle(x0, y0, x1 - x0, y1 - y0)
-                cr.clip()
-                sf = self.get_scale_factor()
-                cr.scale(1 / sf, 1 / sf)
-                cr.set_source_surface(self._ink_layer, 0, 0)
-                cr.paint_with_alpha(0.45 if self._ink_alpha_hl else 1.0)
+        if self._ink_layer is not None and self._ink_tiles:
+            if self._ink_alpha_hl:
+                snapshot.push_opacity(0.45)
+            sf = self._ink_layer.get_device_scale()[0]
+            for key in self._ink_tiles:
+                tex = self._ink_tile(key)
+                snapshot.append_texture(tex, _rect(key[0] * INK_TILE / sf, key[1] * INK_TILE / sf,
+                                                   tex.get_width() / sf, tex.get_height() / sf))
+            if self._ink_alpha_hl:
+                snapshot.pop()
         # Each overlay gets its own tightly bounded cairo node, so e.g. moving the
         # eraser cursor only re-rasterises a few pixels.
         if self._mode == "lasso" and self._page is not None and len(self._lasso) > 1:
@@ -630,7 +629,8 @@ class NotebookCanvas(Gtk.Widget):
             cr.arc(sx, sy, r, 0, 2 * math.pi)
             cr.stroke()
 
-    # -- live ink: drawn incrementally into a screen-sized layer
+    # -- live ink: drawn incrementally into a screen-sized layer; only the tiles a new
+    # segment touches are uploaded again, so long strokes stay cheap on slow tablets.
 
     def _ink_begin(self):
         sf = self.get_scale_factor()
@@ -641,7 +641,7 @@ class NotebookCanvas(Gtk.Widget):
         self._ink_cr = cairo.Context(layer)
         self._ink_cr.set_line_cap(cairo.LINE_CAP_ROUND)
         self._ink_cr.set_line_join(cairo.LINE_JOIN_ROUND)
-        self._ink_box = None
+        self._ink_tiles = {}
         st = self._live_stroke()
         self._ink_alpha_hl = st.tool == "highlighter"
         self._ink_style = st
@@ -664,7 +664,7 @@ class NotebookCanvas(Gtk.Widget):
             w = self._ink_width(st, pts[0][2])
             cr.arc(sx, sy, w / 2, 0, 2 * math.pi)
             cr.fill()
-            self._grow_ink_box(sx, sy, sx, sy, w)
+            self._ink_dirty(sx, sy, sx, sy, w)
             self._ink_drawn = 1
             return
         for k in range(start, len(pts)):
@@ -676,7 +676,7 @@ class NotebookCanvas(Gtk.Widget):
             cr.move_to(ax, ay)
             cr.line_to(bx, by)
             cr.stroke()
-            self._grow_ink_box(ax, ay, bx, by, w)
+            self._ink_dirty(ax, ay, bx, by, w)
         self._ink_drawn = len(pts)
 
     def _ink_width(self, st, p):
@@ -684,17 +684,40 @@ class NotebookCanvas(Gtk.Widget):
         base = st.width if st.tool == "highlighter" or st.style == "ball" else st.width * (0.35 + 0.9 * p)
         return max(0.8, base * self.zoom)
 
-    def _grow_ink_box(self, ax, ay, bx, by, w):
+    def _ink_dirty(self, ax, ay, bx, by, w):
+        """Mark the tiles under a new segment (widget coordinates) as changed."""
+        layer = self._ink_layer
+        sf = layer.get_device_scale()[0]
         m = w / 2 + 2
-        box = (min(ax, bx) - m, min(ay, by) - m, max(ax, bx) + m, max(ay, by) + m)
-        b = self._ink_box
-        self._ink_box = box if b is None else (min(b[0], box[0]), min(b[1], box[1]), max(b[2], box[2]),
-                                               max(b[3], box[3]))
+        cols = (layer.get_width() - 1) // INK_TILE
+        rows = (layer.get_height() - 1) // INK_TILE
+        tx0 = max(0, int((min(ax, bx) - m) * sf) // INK_TILE)
+        tx1 = min(cols, int((max(ax, bx) + m) * sf) // INK_TILE)
+        ty0 = max(0, int((min(ay, by) - m) * sf) // INK_TILE)
+        ty1 = min(rows, int((max(ay, by) + m) * sf) // INK_TILE)
+        for ty in range(ty0, ty1 + 1):
+            for tx in range(tx0, tx1 + 1):
+                self._ink_tiles[(tx, ty)] = None
+
+    def _ink_tile(self, key):
+        tex = self._ink_tiles[key]
+        if tex is None:
+            layer = self._ink_layer
+            layer.flush()
+            stride = layer.get_stride()
+            data = layer.get_data()
+            x0, y0 = key[0] * INK_TILE, key[1] * INK_TILE
+            w = min(INK_TILE, layer.get_width() - x0)
+            h = min(INK_TILE, layer.get_height() - y0)
+            rows = b"".join(data[(y0 + r) * stride + x0 * 4:(y0 + r) * stride + (x0 + w) * 4] for r in range(h))
+            tex = Gdk.MemoryTexture.new(w, h, Gdk.MemoryFormat.B8G8R8A8_PREMULTIPLIED, GLib.Bytes.new(rows), w * 4)
+            self._ink_tiles[key] = tex
+        return tex
 
     def _ink_end(self):
         self._ink_layer = None
         self._ink_cr = None
-        self._ink_box = None
+        self._ink_tiles = {}
 
     def _live_stroke(self):
         t = self.tools
