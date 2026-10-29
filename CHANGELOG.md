@@ -1,6 +1,6 @@
 # Changelog
 
-## Unveröffentlicht
+## 0.4.1 – 2026-10-29
 
 - Linux: **Tabs** – mehrere Hefte gleichzeitig offen; „Zurück“ führt zur Bibliothek, ohne Hefte zu schließen
 - Linux: **Geteilte Ansicht** – zwei Hefte nebeneinander, jede Hälfte mit eigenen Tabs und Werkzeugleiste; Tabs lassen sich zwischen den Hälften ziehen
