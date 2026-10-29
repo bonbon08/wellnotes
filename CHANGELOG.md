@@ -4,6 +4,7 @@
 
 - Linux: **Tabs** – mehrere Hefte gleichzeitig offen; „Zurück“ führt zur Bibliothek, ohne Hefte zu schließen
 - Linux: **Geteilte Ansicht** – zwei Hefte nebeneinander, jede Hälfte mit eigenen Tabs und Werkzeugleiste; Tabs lassen sich zwischen den Hälften ziehen
+- Linux: Schließen des linken Hefts in der geteilten Ansicht (bzw. Ausschalten mit Heften auf beiden Seiten) ließ die App hängen
 - Linux: Keine feinen grauen Querlinien mehr auf den Seiten (Nahtstellen zwischen den GPU-Texturstreifen)
 - Linux: Der Strich erscheint jetzt sofort beim Schreiben, auch bei HiDPI- und fraktionaler Skalierung (vorher erst nach dem Absetzen des Stifts)
 - Linux: Stifteingaben laufen über GTKs `GestureStylus` (eigener Controller für Grafiktablett-Stifte, inklusive aller Zwischenpunkte)

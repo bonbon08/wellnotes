@@ -190,8 +190,8 @@ class Workspace(Adw.NavigationPage):
         else:
             right = self.panes.pop()
             keep = self.active.current()
-            while right.view.get_n_pages():
-                left.view.transfer_page(right.view.get_nth_page(0), left.view, left.view.get_n_pages())
+            for page in [right.view.get_nth_page(i) for i in range(right.view.get_n_pages())]:
+                right.view.transfer_page(page, left.view, left.view.get_n_pages())
             self.paned.set_end_child(None)
             self.set_active(left)
             if keep is not None:

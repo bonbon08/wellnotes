@@ -101,8 +101,34 @@ def s_split_single():
     check(not ws.split and len(win.editors) == 1, "split off")
 
 
+def s_unsplit_both_sides():
+    """Turning split view off with notebooks on both sides moves the right ones over (this hung)."""
+    win.open_document(os.path.join(LIB, "Mathe.goodnotes"))
+    ws.current().actions.activate_action("split", None)
+    check([len(p.editors()) for p in ws.panes] == [1, 1], "one notebook per side")
+    ws.toggle_split()
+    check(not ws.split and len(ws.panes[0].editors()) == 2, "split off keeps both notebooks")
+    check(ws.current().doc.title == "Mathe", "the active notebook stays selected")
+
+
+def s_close_left():
+    """Closing the left notebook of a split view moves the right one over (this hung)."""
+    ws.current().actions.activate_action("split", None)
+    left, right = ws.panes
+    left.view.close_page(left.view.get_nth_page(0))
+
+
+def s_after_close_left():
+    check(not ws.split and [e.doc.title for e in win.editors] == ["Mathe"], "closing the left notebook ends split view")
+    ed = ws.current()
+    drag(ed.canvas, [(200 + i * 4, 500) for i in range(30)])
+    check(sum(len(p.elements) for p in ed.doc.pages) == 2, "remaining notebook still takes input")
+    win.open_document(os.path.join(LIB, "Physik.goodnotes"))
+
+
 def s_delete_open():
     win.show_library()
+    win.close_documents(os.path.join(LIB, "Mathe.goodnotes"))
     p = os.path.join(LIB, "Physik.goodnotes")
     win.close_documents(p)
     check(not win.editors, "deleting/moving an open notebook closes its tab first")
@@ -112,4 +138,4 @@ def s_delete_open():
 
 steps += [s_init, s_open, W, s_library_keeps_tabs, W, W, s_split, W, W, s_split_width, lambda: shot("split"), s_draw_both,
           s_open_into_right, W, lambda: shot("split-tabs"), W, W, W, lambda: shot("split-later"), s_close_right, W, s_after_close, s_split_single, W,
-          s_delete_open, W]
+          s_unsplit_both_sides, W, s_close_left, W, W, s_after_close_left, W, s_delete_open, W]
