@@ -23,6 +23,6 @@ pkgbase = wellnotes
 	optdepends = gnome-online-accounts: Google Drive sign-in via GNOME Online Accounts
 	optdepends = gnome-keyring: keyring backend for libsecret
 	source = wellnotes-0.4.1.tar.gz::https://github.com/bonbon08/wellnotes/archive/refs/tags/v0.4.1.tar.gz
-	sha256sums = SKIP
+	sha256sums = bce9c3d278437753884d0fb90b63ee6fbecbf7bf566112b6b2321991389a0520
 
 pkgname = wellnotes
