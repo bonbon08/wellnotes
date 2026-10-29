@@ -156,6 +156,57 @@ def s_hidpi_live():
     ed.undo(); ed.undo()
 
 
+def s_stylus():
+    """Pen input arrives through GestureStylus; the stroke must show while the tip is down."""
+    ed = app.window.editors[0]
+    c = ed.canvas
+    ed._select_tool("pen")
+    renderer = app.window.get_native().get_renderer()
+
+    class Tool:
+        def get_tool_type(self):
+            return Gdk.DeviceToolType.PEN
+
+    class PenEvent:
+        def get_axis(self, axis):
+            return (True, 0.6) if axis == Gdk.AxisUse.PRESSURE else (False, 0.0)
+
+        def get_device(self):
+            return None
+
+        def get_device_tool(self):
+            return Tool()
+
+        def get_modifier_state(self):
+            return 0
+
+        def get_event_type(self):
+            return Gdk.EventType.BUTTON_PRESS
+
+    g = Gesture(event=PenEvent())
+    x0, y0 = 300, 420
+    page = c.doc.pages[c.to_page(x0, y0)[0]]
+    n = len(page.elements)
+    c._on_stylus_motion(g, x0 - 20, y0)  # hovering: no ink
+    check(c._mode is None, "hovering pen does not draw")
+    c._on_stylus_down(g, x0, y0)
+    for i in range(1, 60):
+        c._on_stylus_motion(g, x0 + i * 4, y0)
+    c._on_drag_end(c._drag, 0, 0)  # the drag gesture giving up must not end the pen stroke
+    s = Gtk.Snapshot()
+    c._snapshot_overlays(s, c.get_width(), c.get_height())
+    tex = renderer.render_texture(s.to_node(), _rect(0, 0, c.get_width(), c.get_height()))
+    dl = Gdk.TextureDownloader.new(tex)
+    dl.set_format(Gdk.MemoryFormat.B8G8R8A8_PREMULTIPLIED)
+    data, stride = dl.download_bytes()
+    data = data.get_data()
+    alpha = max(data[(y0 + dy) * stride + (x0 + 120) * 4 + 3] for dy in (-1, 0, 1))
+    check(c._mode == "ink" and alpha > 200, "pen stroke visible while the tip is down")
+    c._on_stylus_up(g, x0 + 59 * 4, y0)
+    check(len(page.elements) == n + 1 and c._ink_layer is None, "pen stroke committed on lift")
+    ed.undo()
+
+
 def s_close():
     ed = app.window.editors[0]
     ed.canvas.scroll_to_page(0)
@@ -170,4 +221,4 @@ def s_check():
     check(len(g.pages) == 4, "GoodNotes view: 4 pages")
 
 
-steps += [s_new, W, s_tools, W, lambda: shot("tools"), s_hidpi_live, s_perf, W, lambda: shot("perf"), s_close, W, W, s_check]
+steps += [s_new, W, s_tools, W, lambda: shot("tools"), s_hidpi_live, s_stylus, s_perf, W, lambda: shot("perf"), s_close, W, W, s_check]

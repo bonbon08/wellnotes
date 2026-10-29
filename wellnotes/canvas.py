@@ -194,6 +194,16 @@ class NotebookCanvas(Gtk.Widget):
         self.add_controller(drag)
         self._drag = drag
 
+        # Pens go through GestureStylus, GTK's controller for tablet tools: it reports
+        # every movement while the tip is down, together with the coalesced samples.
+        stylus = Gtk.GestureStylus()
+        stylus.connect("down", self._on_stylus_down)
+        stylus.connect("motion", self._on_stylus_motion)
+        stylus.connect("up", self._on_stylus_up)
+        self.add_controller(stylus)
+        self._stylus = stylus
+        self._stylus_active = False
+
         scroll = Gtk.EventControllerScroll.new(Gtk.EventControllerScrollFlags.BOTH_AXES |
                                                Gtk.EventControllerScrollFlags.KINETIC)
         scroll.connect("scroll", self._on_scroll)
@@ -805,16 +815,26 @@ class NotebookCanvas(Gtk.Widget):
         pts = []
         if ev is None or ev.get_event_type() != Gdk.EventType.MOTION_NOTIFY:
             return pts
-        try:
-            hist = ev.get_history()
-        except (TypeError, AttributeError):
-            return pts
-        if not hist:
-            return pts
-        ok, ex, ey = ev.get_position()
-        if not ok:
-            return pts
-        offx, offy = wx - ex, wy - ey
+        if isinstance(gesture, Gtk.GestureStylus):
+            # The stylus backlog is already in widget coordinates.
+            try:
+                ok, hist = gesture.get_backlog()
+            except (TypeError, AttributeError, ValueError):
+                return pts
+            if not ok or not hist:
+                return pts
+            offx = offy = 0.0
+        else:
+            try:
+                hist = ev.get_history()
+            except (TypeError, AttributeError):
+                return pts
+            if not hist:
+                return pts
+            ok, ex, ey = ev.get_position()
+            if not ok:
+                return pts
+            offx, offy = wx - ex, wy - ey
         for tc in hist:
             try:
                 axes = tc.axes
@@ -831,7 +851,32 @@ class NotebookCanvas(Gtk.Widget):
             return []
         return [(x, y, None if p is None else min(1.0, max(0.0, p))) for x, y, p in pts]
 
+    def _on_stylus_down(self, g, x, y):
+        self._stylus_active = True
+        self._on_drag_begin(g, x, y)
+
+    def _on_stylus_motion(self, g, x, y):
+        if self._stylus_active:  # "motion" is also emitted while the pen hovers
+            self._on_drag_update(g, x - self._drag_start[0], y - self._drag_start[1])
+
+    def _on_stylus_up(self, g, x, y):
+        if self._stylus_active:
+            self._stylus_active = False
+            self._on_drag_end(g, x - self._drag_start[0], y - self._drag_start[1])
+
+    def _for_stylus(self, g, ev=None):
+        """True for drag-gesture events that GestureStylus handles instead."""
+        if g is not self._drag:
+            return False
+        if self._stylus_active:
+            return True
+        ev = ev or g.get_current_event()
+        return ev is not None and ev.get_device_tool() is not None
+
     def _on_drag_begin(self, g, sx, sy):
+        if self._for_stylus(g):
+            g.set_state(Gtk.EventSequenceState.DENIED)
+            return
         self._stop_kinetic()
         self.grab_focus()
         ev, source, tool_type, pressure = self._event_info(g)
@@ -907,6 +952,8 @@ class NotebookCanvas(Gtk.Widget):
         self.queue_draw()
 
     def _on_drag_update(self, g, dx, dy):
+        if g is self._drag and self._stylus_active:
+            return
         sx, sy = self._drag_start[0] + dx, self._drag_start[1] + dy
         if self._mode == "pan":
             hx, vy = self._pan_start
@@ -954,6 +1001,8 @@ class NotebookCanvas(Gtk.Widget):
         self.queue_draw()
 
     def _on_drag_end(self, g, dx, dy):
+        if g is self._drag and self._stylus_active:
+            return
         mode = self._mode
         self._mode = None
         if mode == "pan" and self._pan_kinetic:
@@ -984,6 +1033,7 @@ class NotebookCanvas(Gtk.Widget):
             self.doc.commit(self._token)
             self.emit("changed")
         self._mode = None
+        self._stylus_active = False
         self._page = None
         self._points = []
         self._lasso = []
