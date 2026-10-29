@@ -80,3 +80,12 @@ flowboxchild {
 .wn-cover-choice {
   padding: 2px;
 }
+
+/* Split view: a thin accent line marks the pane that receives input and new notebooks. */
+.wn-pane.wn-split {
+  border-top: 3px solid transparent;
+}
+
+.wn-pane.wn-split.wn-pane-active {
+  border-top-color: @accent_bg_color;
+}

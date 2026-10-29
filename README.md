@@ -22,6 +22,7 @@
   - Die Radierer-Spitze und die Stifttaste radieren.
   - Handflächenerkennung: Finger scrollen (mit Schwung) und zoomen.
   - Wischgesten schließen nie versehentlich ein Heft.
+- **Mehrere Hefte gleichzeitig.** Tabs und geteilte Ansicht (zwei Hefte nebeneinander, z. B. Skript und Mitschrift)
 - **Notizbücher.** Endlos scrollbare Seiten, Seitenübersicht, Vollbildmodus, Papiervorlagen (blanko, liniert, kariert, gepunktet), Umschläge, Ordner, Suche, Undo/Redo, Autosave
 - **`.goodnotes` lesen und schreiben.** Das Containerformat von GoodNotes 6 wurde zurückentwickelt ([Spezifikation](docs/goodnotes-format.md)).
 - **Importieren.**

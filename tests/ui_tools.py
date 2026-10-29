@@ -210,7 +210,7 @@ def s_stylus():
 def s_close():
     ed = app.window.editors[0]
     ed.canvas.scroll_to_page(0)
-    app.window.nav.pop()
+    app.window.show_library()
 
 
 def s_check():

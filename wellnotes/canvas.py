@@ -69,23 +69,26 @@ class _Cache:
         self.strips = [None] * ((surface.get_height() + STRIP - 1) // STRIP)
 
     def texture(self, i):
-        tex = self.strips[i]
-        if tex is None:
+        """Strip ``i`` as (texture, first row).  Strips include one row of their neighbours, so
+        filtering at the strip edges blends with real page pixels instead of transparency
+        (which showed up as thin grey lines across the page)."""
+        strip = self.strips[i]
+        if strip is None:
             surf = self.surface
             surf.flush()
             stride = surf.get_stride()
-            y0 = i * STRIP
-            h = min(STRIP, surf.get_height() - y0)
-            data = surf.get_data()[y0 * stride:(y0 + h) * stride]
-            tex = Gdk.MemoryTexture.new(surf.get_width(), h, Gdk.MemoryFormat.B8G8R8A8_PREMULTIPLIED,
+            y0 = max(0, i * STRIP - 1)
+            y1 = min(surf.get_height(), (i + 1) * STRIP + 1)
+            data = surf.get_data()[y0 * stride:y1 * stride]
+            tex = Gdk.MemoryTexture.new(surf.get_width(), y1 - y0, Gdk.MemoryFormat.B8G8R8A8_PREMULTIPLIED,
                                         GLib.Bytes.new(bytes(data)), stride)
-            self.strips[i] = tex
-        return tex
+            strip = self.strips[i] = (tex, y0)
+        return strip
 
     def dirty(self, y0, y1):
         """Mark page-unit rows y0..y1 as changed."""
-        a = max(0, int(y0 * self.scale) // STRIP)
-        b = min(len(self.strips) - 1, int(math.ceil(y1 * self.scale)) // STRIP)
+        a = max(0, (int(y0 * self.scale) - 1) // STRIP)
+        b = min(len(self.strips) - 1, (int(math.ceil(y1 * self.scale)) + 1) // STRIP)
         for i in range(a, b + 1):
             self.strips[i] = None
 
@@ -582,8 +585,8 @@ class NotebookCanvas(Gtk.Widget):
                     sh = min(STRIP, c.surface.get_height() - si * STRIP) * k
                     if sy + sh < 0 or sy > h:
                         continue
-                    # Overlap by a fraction of a pixel to hide seams between strips.
-                    snapshot.append_scaled_texture(c.texture(si), filt, _rect(x, sy, cw, sh + 0.5))
+                    tex, row0 = c.texture(si)
+                    snapshot.append_scaled_texture(tex, filt, _rect(x, y + row0 * k, cw, tex.get_height() * k))
             if moving and page is sel_page and self._sel_tex:
                 tex, bx0, by0, bx1, by1 = self._sel_tex
                 fn, sc = self._transform_fn()

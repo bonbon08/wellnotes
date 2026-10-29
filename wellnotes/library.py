@@ -106,6 +106,11 @@ class Library(Adw.NavigationPage):
         hb.pack_end(self.sync_button)
         self.search_button = Gtk.ToggleButton(icon_name="system-search-symbolic", tooltip_text="Suchen (Strg+F)")
         hb.pack_end(self.search_button)
+        self.open_content = Adw.ButtonContent(icon_name="view-paged-symbolic")
+        self.open_button = Gtk.Button(child=self.open_content, tooltip_text="Zurück zu den geöffneten Heften",
+                                      visible=False)
+        self.open_button.connect("clicked", lambda b: self.window.show_workspace())
+        hb.pack_end(self.open_button)
         tv.add_top_bar(hb)
 
         self.search_bar = Gtk.SearchBar()
@@ -240,6 +245,9 @@ class Library(Adw.NavigationPage):
         return out
 
     def refresh(self):
+        n = len(self.window.editors)
+        self.open_button.set_visible(n > 0)
+        self.open_content.set_label("%d offen" % n)
         self.up_button.set_visible(self.folder != self.root)
         rel = os.path.relpath(self.folder, self.root)
         self.title.set_title("Dokumente" if rel == "." else os.path.basename(self.folder))
@@ -517,6 +525,7 @@ class Library(Adw.NavigationPage):
         def resp(d, r):
             name = entry.get_text().strip()
             if r == "ok" and name and name != current:
+                self.window.close_documents(path)
                 new = self.rename_path(path, name)
                 if is_doc and new:
                     try:
@@ -546,6 +555,7 @@ class Library(Adw.NavigationPage):
         def resp(d, r):
             if r != "delete":
                 return
+            self.window.close_documents(path)
             try:
                 Gio.File.new_for_path(path).trash(None)
             except GLib.Error:
@@ -581,6 +591,7 @@ class Library(Adw.NavigationPage):
                 return
             name = os.path.basename(path)
             base, ext = os.path.splitext(name) if os.path.isfile(path) else (name, "")
+            self.window.close_documents(path)
             shutil.move(path, unique_path(target, base, ext))
             self.refresh()
         dlg.connect("response", resp)

@@ -14,6 +14,7 @@ from .canvas import Tools  # noqa: E402
 from .editor import Editor  # noqa: E402
 from .library import Library  # noqa: E402
 from .sync import SyncManager  # noqa: E402
+from .workspace import Workspace  # noqa: E402
 
 APP_ID = "io.github.wellnotes.WellNotes"
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -28,6 +29,8 @@ class Window(Adw.ApplicationWindow):
         self.nav = Adw.NavigationView()
         self.library = Library(self)
         self.nav.add(self.library)
+        self.workspace = Workspace(self)
+        self.nav.add(self.workspace)  # stays alive while the library is shown
         self.set_content(self.nav)
         self.prefs = None
         self.sync = SyncManager(lambda: self.library.root,
@@ -36,13 +39,43 @@ class Window(Adw.ApplicationWindow):
         self.library.update_sync_visibility()
         self.connect("close-request", self._on_close)
         self.connect("notify::fullscreened", self._on_fullscreen)
-        self.nav.connect("popped", lambda nav, page: self.is_fullscreen() and self.unfullscreen())
+        self.nav.connect("popped", self._on_popped)
         if self.sync.enabled and settings.get("sync", "auto"):
             GLib.timeout_add_seconds(2, lambda: self.sync.sync(quiet=True) and False)
 
     def _on_fullscreen(self, *a):
         for ed in self.editors:
             ed.on_fullscreen_changed(self.is_fullscreen())
+        self.workspace.set_fullscreen(self.is_fullscreen())
+
+    def _on_popped(self, nav, page):
+        if self.is_fullscreen():
+            self.unfullscreen()
+        if page is self.workspace:
+            # Notebooks stay open in their tabs; make the library show their current state.
+            for ed in self.editors:
+                if ed.canvas._text_editor:
+                    ed.canvas.commit_text()
+                if ed.doc.dirty:
+                    ed.save(sync=True)
+            self.library.refresh()
+
+    def show_workspace(self):
+        if self.editors and self.nav.get_visible_page() is not self.workspace:
+            self.nav.push(self.workspace)
+
+    def show_library(self, pane=None):
+        """Back to the library; the next notebook opened there goes into ``pane``."""
+        self.workspace.target = pane
+        if self.nav.get_visible_page() is not self.library:
+            self.nav.pop_to_page(self.library)
+
+    def close_documents(self, path):
+        """Close the tabs of ``path`` or of notebooks inside the folder ``path`` (before it is moved/deleted)."""
+        for ed in list(self.editors):
+            p = ed.doc.path or ""
+            if p == path or p.startswith(path.rstrip("/") + "/"):
+                self.workspace.close_editor(ed)
 
     def _on_sync_state(self, running, message, error):
         self.library.on_sync_state(running, message, error)
@@ -62,7 +95,8 @@ class Window(Adw.ApplicationWindow):
     def open_document(self, path, doc=None):
         for ed in self.editors:
             if ed.doc.path == path:
-                self.nav.push(ed)
+                self.workspace.select(ed)
+                self.show_workspace()
                 return ed
         try:
             doc = doc or fileformat.load(path)
@@ -74,7 +108,8 @@ class Window(Adw.ApplicationWindow):
             doc.title = fileformat.title_from_path(path)
         ed = Editor(self, doc)
         self.editors.append(ed)
-        self.nav.push(ed)
+        self.workspace.add(ed)
+        self.show_workspace()
         return ed
 
     def on_editor_closed(self, ed):

@@ -184,12 +184,11 @@ class SizeControl(Gtk.Box):
         settings.save()
 
 
-class Editor(Adw.NavigationPage):
+class Editor(Adw.Bin):
+    """One open notebook; lives in a tab of the workspace."""
+
     def __init__(self, window, doc: Document):
-        super().__init__(title=doc.title, tag="editor")
-        # No swipe/escape/back-gesture pops: on tablets a sideways swipe closed notebooks by accident.
-        # The page is closed only via the explicit back button (or Alt+Left).
-        self.set_can_pop(False)
+        super().__init__()
         self.window = window
         self.doc = doc
         self.tools = window.tools
@@ -211,7 +210,9 @@ class Editor(Adw.NavigationPage):
         view = Adw.ToolbarView()
         self.header = self._build_header()
         view.add_top_bar(self.header)
-        view.add_top_bar(self._build_toolbar())
+        # Scrollable so that narrow windows and split view don't force the window wider.
+        view.add_top_bar(Gtk.ScrolledWindow(child=self._build_toolbar(), vscrollbar_policy=Gtk.PolicyType.NEVER,
+                                            propagate_natural_width=True, propagate_natural_height=True))
         view.set_top_bar_style(Adw.ToolbarStyle.RAISED)
 
         overlay = Gtk.Overlay()
@@ -248,7 +249,6 @@ class Editor(Adw.NavigationPage):
         self._select_tool(self.tools.tool)
         self._rebuild_sidebar()
         self._update_page_label()
-        self.connect("hidden", lambda *a: self.close())
 
     # ------------------------------------------------------------------
     # UI construction
@@ -258,7 +258,7 @@ class Editor(Adw.NavigationPage):
         self.title_widget = Adw.WindowTitle(title=self.doc.title)
         hb.set_title_widget(self.title_widget)
         hb.set_show_back_button(False)
-        back = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text="Zurück zur Bibliothek (Alt+←)",
+        back = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text="Bibliothek (Alt+←) – Hefte bleiben offen",
                           action_name="ed.back")
         hb.pack_start(back)
         self.sidebar_button = Gtk.ToggleButton(icon_name="view-grid-symbolic", tooltip_text="Seitenübersicht")
@@ -278,6 +278,10 @@ class Editor(Adw.NavigationPage):
         sec.append("Bild einfügen…", "ed.insert-image")
         menu.append_section(None, sec)
         sec = Gio.Menu()
+        sec.append("Geteilte Ansicht", "ed.split")
+        sec.append("Heft schließen", "ed.close-tab")
+        menu.append_section(None, sec)
+        sec = Gio.Menu()
         sec.append("Mit dem Finger zeichnen", "ed.finger-draw")
         sec.append("Umbenennen…", "ed.rename")
         menu.append_section(None, sec)
@@ -290,6 +294,8 @@ class Editor(Adw.NavigationPage):
 
         hb.pack_end(Gtk.Button(icon_name="view-fullscreen-symbolic", tooltip_text="Vollbild (F11)",
                                action_name="ed.fullscreen"))
+        hb.pack_end(Gtk.Button(icon_name="view-dual-symbolic", tooltip_text="Geteilte Ansicht (Strg+\\)",
+                               action_name="ed.split"))
         add = Gtk.Button(icon_name="list-add-symbolic", tooltip_text="Neue Seite (Strg+Umschalt+N)",
                          action_name="ed.add-page-after")
         hb.pack_end(add)
@@ -512,7 +518,10 @@ class Editor(Adw.NavigationPage):
         add("next-page", lambda: self.canvas.scroll_to_page(self.canvas.current_page + 1))
         add("prev-page", lambda: self.canvas.scroll_to_page(self.canvas.current_page - 1))
         add("save", lambda: self.save(sync=True))
-        add("back", lambda: self.window.nav.pop())
+        add("back", self.window.show_library)
+        add("new-tab", self.window.show_library)
+        add("close-tab", lambda: self.window.workspace.close_editor(self))
+        add("split", lambda: self.window.workspace.toggle_split(self))
         add("fullscreen", self.toggle_fullscreen)
         for t in ("pen", "highlighter", "eraser", "shape", "lasso", "text"):
             add("tool-" + t, lambda t=t: self._select_tool(t))
@@ -535,7 +544,8 @@ class Editor(Adw.NavigationPage):
                               ("<Control>plus", "zoom-in"), ("<Control>equal", "zoom-in"),
                               ("<Control>minus", "zoom-out"), ("Page_Down", "next-page"),
                               ("Page_Up", "prev-page"), ("<Control>s", "save"), ("<Control>e", "export-pdf"),
-                              ("F11", "fullscreen"), ("<Alt>Left", "back"),
+                              ("F11", "fullscreen"), ("<Alt>Left", "back"), ("<Control>t", "new-tab"),
+                              ("<Control>w", "close-tab"), ("<Control>backslash", "split"),
                               ("p", "tool-pen"), ("h", "tool-highlighter"), ("e", "tool-eraser"),
                               ("s", "tool-shape"), ("l", "tool-lasso"), ("t", "tool-text")]:
             sc.add_shortcut(Gtk.Shortcut(trigger=Gtk.ShortcutTrigger.parse_string(accel),
@@ -1024,7 +1034,7 @@ class Editor(Adw.NavigationPage):
                 self.doc.title = name
                 self.doc.dirty = True
                 self.title_widget.set_title(name)
-                self.set_title(name)
+                self.window.workspace.update_title(self)
                 self._schedule_save()
         dlg.connect("response", resp)
         dlg.present(self.window)

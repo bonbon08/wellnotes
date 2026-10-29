@@ -3,6 +3,7 @@
 ## Inhalt
 1. [Bibliothek](#bibliothek)
 2. [Notizbuch und Werkzeuge](#notizbuch-und-werkzeuge)
+   - [Mehrere Hefte: Tabs und geteilte Ansicht](#mehrere-hefte-tabs-und-geteilte-ansicht)
 3. [Stift, Touch und Handflächenerkennung](#stift-touch-und-handflächenerkennung)
 4. [Seiten](#seiten)
 5. [Importieren](#importieren)
@@ -61,11 +62,31 @@ Ist *Auf Linien* aus, oder bei Blanko- und PDF-Seiten, gilt die eingestellte Tex
 
 **Vollbild.** F11 oder der Knopf mit den Pfeilen in der Titelleiste. Die Titelleiste verschwindet, und die Werkzeugleiste zeigt links *Vollbild verlassen* und Rückgängig/Wiederholen, rechts die Seitenzahl und *Neue Seite*. Mit F11 geht es zurück.
 
-**Zurück zur Bibliothek.** Nur über den Pfeil oben links oder Alt+←. Wischgesten und die Esc-Taste schließen ein Notizbuch absichtlich *nicht*, damit nichts versehentlich zugeht.
+**Zurück zur Bibliothek.** Nur über den Pfeil oben links oder Alt+←. Das Heft bleibt dabei als Tab geöffnet (siehe unten). Wischgesten und die Esc-Taste führen absichtlich *nicht* zurück, damit nichts versehentlich zugeht.
 
 **Rückgängig/Wiederholen.** Strg+Z / Strg+Umschalt+Z oder die Pfeile in der Titelleiste. Das gilt auch für Radieren, Verschieben und Seitenänderungen.
 
 **Speichern.** Passiert automatisch 1,5 Sekunden nach jeder Änderung und beim Schließen. Strg+S speichert sofort.
+
+### Mehrere Hefte: Tabs und geteilte Ansicht
+
+**Tabs.** Jedes Heft, das du in der Bibliothek öffnest, kommt als eigener Tab dazu. Die Tableiste erscheint, sobald zwei oder mehr Hefte offen sind. Ein Tipp auf einen Tab wechselt das Heft, das ✕ schließt es (vorher wird gespeichert).
+- Der Pfeil oben links führt zur Bibliothek, *ohne* die Hefte zu schließen. Oben rechts zeigt die Bibliothek dann „*n* offen“; damit geht es zurück zu den Heften.
+- Der „+“-Knopf rechts in der Tableiste (Strg+T) öffnet die Bibliothek, um ein weiteres Heft dazuzunehmen.
+- Ein schon geöffnetes Heft wird nicht doppelt geöffnet, sondern sein Tab ausgewählt.
+- Tabs lassen sich mit der Maus oder dem Finger umsortieren.
+
+**Geteilte Ansicht.** Der Knopf mit den zwei Spalten in der Titelleiste (oder Menü ☰ → *Geteilte Ansicht*, Strg+\\) teilt das Fenster in zwei Hälften, z. B. für ein Skript links und die Mitschrift rechts.
+- Sind mehrere Hefte offen, wandert das aktuelle Heft nach rechts. Ist nur eins offen, bietet die rechte Hälfte *Heft öffnen…* an.
+- Jede Hälfte hat eigene Tabs, eine eigene Titelleiste (Rückgängig, Seiten, Menü) und eine eigene Werkzeugleiste. Stift, Farben und Größen gelten für beide.
+- Die Hälfte, in der du zuletzt geschrieben oder getippt hast, ist mit einer farbigen Linie markiert. Neue Hefte aus der Bibliothek landen dort bzw. in der Hälfte, deren „+“ du gedrückt hast.
+- Tabs lassen sich zwischen den Hälften hin- und herziehen. Die Trennlinie in der Mitte verschiebt die Aufteilung.
+- Wird die Werkzeugleiste zu schmal, lässt sie sich seitlich wischen bzw. scrollen.
+- Nochmal auf den Knopf: Alle Hefte kommen wieder in eine Tableiste. Schließt du das letzte Heft einer Hälfte, endet die geteilte Ansicht von selbst.
+
+![Geteilte Ansicht mit Tabs](screenshots/split-view.png)
+
+**Umbenennen, Verschieben, Löschen** eines geöffneten Hefts in der Bibliothek schließt vorher seinen Tab (mit Speichern).
 
 ## Stift, Touch und Handflächenerkennung
 
@@ -216,7 +237,11 @@ Passwörter und Tokens liegen im System-Schlüsselbund (libsecret, z. B. GNOME K
 | Strg+Plus / Strg+Minus / Strg+0 | Zoom / an Breite anpassen |
 | Strg+S | Sofort speichern |
 | F11 | Vollbild ein/aus |
-| Alt+← | Zurück zur Bibliothek |
+| Alt+← | Zur Bibliothek (Hefte bleiben offen) |
+| Strg+T | Weiteres Heft öffnen (Bibliothek) |
+| Strg+W | Heft (Tab) schließen |
+| Strg+Tab, Strg+Umschalt+Tab | Nächster / vorheriger Tab |
+| Strg+\\ | Geteilte Ansicht ein/aus |
 | Strg+E | Als PDF exportieren |
 | Strg+N / Strg+O / Strg+F | Neues Notizbuch / Importieren / Suchen (Bibliothek) |
 | Strg+Komma | Einstellungen |

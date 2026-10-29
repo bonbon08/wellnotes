@@ -18,7 +18,7 @@ def s_new():
 
 def s_gestures():
     ed = app.window.editors[0]
-    check(not ed.get_can_pop(), "notebook cannot be popped by swipe/escape gestures")
+    check(not app.window.workspace.get_can_pop(), "notebook cannot be popped by swipe/escape gestures")
 
 
 def s_text():
