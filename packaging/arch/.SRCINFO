@@ -1,6 +1,6 @@
 pkgbase = wellnotes
 	pkgdesc = Handwritten notes for Linux (GTK 4) – compatible with .goodnotes files, Markdown/Obsidian import, Nextcloud/Google Drive sync
-	pkgver = 0.3.0
+	pkgver = 0.4.0
 	pkgrel = 1
 	url = https://github.com/bonbon08/wellnotes
 	arch = any
@@ -22,7 +22,7 @@ pkgbase = wellnotes
 	optdepends = libsecret: store sync passwords in the system keyring
 	optdepends = gnome-online-accounts: Google Drive sign-in via GNOME Online Accounts
 	optdepends = gnome-keyring: keyring backend for libsecret
-	source = wellnotes-0.3.0.tar.gz::https://github.com/bonbon08/wellnotes/archive/refs/tags/v0.3.0.tar.gz
-	sha256sums = ab0ad8b43430c82ef5738104bba55352444fc74a6a1921606acd2c4f7e0c1c90
+	source = wellnotes-0.4.0.tar.gz::https://github.com/bonbon08/wellnotes/archive/refs/tags/v0.4.0.tar.gz
+	sha256sums = 7222fba5f5dee8dee101f236af2f09bca33a650f7d26f8a10cb852c80447ea8b
 
 pkgname = wellnotes
